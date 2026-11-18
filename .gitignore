@@ -1,0 +1,19 @@
+# binários e saídas de build
+/vkdl
+/bin/
+/dist/
+*.test
+*.out
+
+# dados locais
+/data/
+*.db
+*.db-shm
+*.db-wal
+
+# segredos e editores
+.env
+.env.*
+.idea/
+.vscode/
+.DS_Store

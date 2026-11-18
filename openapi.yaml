@@ -1,0 +1,332 @@
+openapi: 3.1.0
+info:
+  title: vkdl.link
+  version: 1.0.0
+  summary: Hospedagem de imagens simples e de código aberto.
+  description: |
+    Envios anônimos não têm retenção garantida: quando o armazenamento enche,
+    os arquivos despejáveis mais antigos são apagados primeiro. Envios com chave
+    de API ficam protegidos até `expires_at` (ou para sempre, se `null`).
+    Só PNG, JPEG, GIF e WebP, detectados pelos bytes mágicos.
+  license:
+    name: AGPL-3.0-only
+    identifier: AGPL-3.0-only
+  contact:
+    url: https://github.com/vkdprojects/vkdl.link
+servers:
+  - url: https://vkdl.link
+tags:
+  - name: files
+  - name: admin
+  - name: meta
+
+paths:
+  /healthz:
+    get:
+      tags: [meta]
+      summary: Verificação de saúde (inclui ping no banco)
+      operationId: health
+      responses:
+        "200":
+          description: Saudável
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, const: ok }
+        "503": { $ref: "#/components/responses/Error" }
+
+  /v1/upload:
+    post:
+      tags: [files]
+      summary: Envia uma imagem
+      operationId: upload
+      description: |
+        Corpo `multipart/form-data` com o campo `file` (preferido) ou a imagem
+        crua no corpo, com qualquer Content-Type. O formato é decidido pelos
+        bytes do arquivo. Com `Authorization: Bearer vk_…` o envio fica ligado
+        à chave (retenção garantida); chave inválida ou revogada dá 401.
+      security:
+        - {}
+        - apiKey: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  contentMediaType: application/octet-stream
+          application/octet-stream:
+            schema:
+              type: string
+              contentMediaType: application/octet-stream
+      responses:
+        "201":
+          description: Arquivo criado
+          headers:
+            Location:
+              description: Mesmo valor de `url`
+              schema: { type: string, format: uri }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Upload" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+        "415": { $ref: "#/components/responses/Error" }
+        "429":
+          description: Limite de envios por minuto atingido
+          headers:
+            Retry-After:
+              description: Segundos até poder tentar de novo
+              schema: { type: integer, minimum: 1 }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "507": { $ref: "#/components/responses/Error" }
+    options:
+      tags: [files]
+      summary: Preflight CORS
+      operationId: uploadPreflight
+      responses:
+        "204":
+          description: "CORS liberado (`Access-Control-Allow-Origin: *`)"
+
+  /{file}:
+    parameters:
+      - name: file
+        in: path
+        required: true
+        description: "`<id>.<ext>` ou só `<id>`. Extensão diferente da do arquivo dá 404."
+        schema:
+          type: string
+          pattern: "^[0-9A-Za-z]{8}(\\.(png|jpg|gif|webp))?$"
+        example: aB3dE9xQ.png
+    get:
+      tags: [files]
+      summary: Baixa o arquivo
+      operationId: getFile
+      description: Suporta `Range`, `If-None-Match` e `If-Modified-Since`.
+      parameters:
+        - { name: Range, in: header, required: false, schema: { type: string }, example: "bytes=0-1023" }
+        - { name: If-None-Match, in: header, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: Conteúdo da imagem
+          headers:
+            ETag: { description: "SHA-256 do conteúdo, entre aspas", schema: { type: string } }
+            Cache-Control: { schema: { type: string, const: "public, max-age=31536000, immutable" } }
+            Content-Disposition: { schema: { type: string }, example: 'inline; filename="aB3dE9xQ.png"' }
+            X-Content-Type-Options: { schema: { type: string, const: nosniff } }
+            Content-Security-Policy: { schema: { type: string } }
+            Referrer-Policy: { schema: { type: string, const: no-referrer } }
+            Access-Control-Allow-Origin: { schema: { type: string, const: "*" } }
+          content:
+            image/png: { schema: { type: string, contentMediaType: image/png } }
+            image/jpeg: { schema: { type: string, contentMediaType: image/jpeg } }
+            image/gif: { schema: { type: string, contentMediaType: image/gif } }
+            image/webp: { schema: { type: string, contentMediaType: image/webp } }
+        "206": { description: Conteúdo parcial (Range) }
+        "304": { description: Não modificado (If-None-Match) }
+        "404":
+          description: Não encontrado (texto simples)
+          content:
+            text/plain: { schema: { type: string } }
+    head:
+      tags: [files]
+      summary: Cabeçalhos do arquivo, sem corpo
+      operationId: headFile
+      responses:
+        "200": { description: Mesmos cabeçalhos do GET }
+        "404": { description: Não encontrado }
+
+  /v1/files/{id}:
+    delete:
+      tags: [files]
+      summary: Apaga um arquivo
+      operationId: deleteFile
+      description: Exige `X-Delete-Token` (devolvido no envio) ou o bearer de administrador.
+      security:
+        - deleteToken: []
+        - adminToken: []
+      parameters:
+        - $ref: "#/components/parameters/FileID"
+      responses:
+        "204": { description: Apagado }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/keys:
+    post:
+      tags: [admin]
+      summary: Cria uma chave de API
+      operationId: createKey
+      security: [{ adminToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 100 }
+                retention_days:
+                  type: integer
+                  minimum: 0
+                  maximum: 36500
+                  default: 0
+                  description: Retenção garantida em dias; 0 = para sempre.
+      responses:
+        "201":
+          description: Chave criada. `key` só aparece nesta resposta.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, name, key, retention_days, created_at]
+                properties:
+                  id: { type: string }
+                  name: { type: string }
+                  key: { type: string, pattern: "^vk_[0-9A-Za-z]{40}$" }
+                  retention_days: { type: integer }
+                  created_at: { type: string, format: date-time }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/AdminDisabled" }
+    get:
+      tags: [admin]
+      summary: Lista as chaves (sem segredos)
+      operationId: listKeys
+      security: [{ adminToken: [] }]
+      responses:
+        "200":
+          description: Chaves, das mais novas para as mais antigas
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [keys]
+                properties:
+                  keys:
+                    type: array
+                    items: { $ref: "#/components/schemas/APIKey" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/AdminDisabled" }
+
+  /v1/admin/keys/{id}:
+    delete:
+      tags: [admin]
+      summary: Revoga uma chave (idempotente)
+      operationId: revokeKey
+      security: [{ adminToken: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Revogada }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/stats:
+    get:
+      tags: [admin]
+      summary: Números do armazenamento
+      operationId: stats
+      security: [{ adminToken: [] }]
+      responses:
+        "200":
+          description: Estatísticas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  files: { type: integer }
+                  anon_files: { type: integer }
+                  keyed_files: { type: integer }
+                  total_bytes: { type: integer }
+                  max_storage: { type: integer }
+                  min_free_disk: { type: integer }
+                  disk_free: { type: [integer, "null"] }
+                  evictable_files: { type: integer }
+                  evictable_bytes: { type: integer }
+                  active_keys: { type: integer }
+                  revoked_keys: { type: integer }
+                  max_upload: { type: integer }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/AdminDisabled" }
+
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+      description: Chave de API no formato `vk_…`.
+    adminToken:
+      type: http
+      scheme: bearer
+      description: Valor de `VKDL_ADMIN_TOKEN`.
+    deleteToken:
+      type: apiKey
+      in: header
+      name: X-Delete-Token
+
+  parameters:
+    FileID:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, pattern: "^[0-9A-Za-z]{8}$" }
+
+  schemas:
+    Upload:
+      type: object
+      required: [id, url, delete_url, delete_token, size, mime, expires_at]
+      properties:
+        id: { type: string, pattern: "^[0-9A-Za-z]{8}$", examples: [aB3dE9xQ] }
+        url: { type: string, format: uri, examples: ["https://vkdl.link/aB3dE9xQ.png"] }
+        delete_url: { type: string, format: uri, examples: ["https://vkdl.link/v1/files/aB3dE9xQ"] }
+        delete_token: { type: string, description: Opaco; guarde para apagar depois. }
+        size: { type: integer }
+        mime: { type: string, enum: [image/png, image/jpeg, image/gif, image/webp] }
+        expires_at:
+          type: [string, "null"]
+          format: date-time
+          description: null = anônimo (sem garantia) ou chave com retenção para sempre.
+    APIKey:
+      type: object
+      required: [id, name, retention_days, created_at, revoked_at, active]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        retention_days: { type: integer }
+        created_at: { type: string, format: date-time }
+        revoked_at: { type: [string, "null"], format: date-time }
+        active: { type: boolean }
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          description: Código estável
+          examples: [no_file, invalid_api_key, too_large, unsupported_type, rate_limited, storage_full, forbidden, not_found, unauthorized, bad_request, internal, unavailable]
+        message: { type: string, description: Texto para humanos (pt-BR) }
+
+  responses:
+    Error:
+      description: Erro
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    AdminDisabled:
+      description: API de admin desligada (`VKDL_ADMIN_TOKEN` vazio)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }

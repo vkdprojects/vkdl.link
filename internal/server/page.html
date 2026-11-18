@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vkdl.link</title>
+<meta name="description" content="Hospedagem de imagens simples e de código aberto.">
+<style>
+:root{--bg:#fafaf9;--fg:#1c1917;--muted:#57534e;--line:#e7e5e4;--code:#f0efed;--accent:#0f766e}
+@media (prefers-color-scheme:dark){:root{--bg:#141414;--fg:#ececec;--muted:#a3a3a3;--line:#2b2b2b;--code:#1f1f1f;--accent:#5eead4}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:46rem;margin:0 auto;padding:3rem 1rem 4rem}
+h1{font-size:2rem;margin:0 0 .25rem;letter-spacing:-.02em}
+h1 span{color:var(--accent)}
+h2{font-size:1.1rem;margin:2.25rem 0 .5rem}
+p,li{color:var(--fg)}
+.lead{color:var(--muted);margin-top:0}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:.85rem 1rem;overflow-x:auto;font-size:.875rem;line-height:1.5}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em}
+p code,li code{background:var(--code);padding:.1em .35em;border-radius:4px}
+a{color:var(--accent)}
+hr{border:0;border-top:1px solid var(--line);margin:3rem 0}
+footer{color:var(--muted);font-size:.875rem;margin-top:3rem}
+</style>
+</head>
+<body>
+<main>
+<h1>vkdl<span>.link</span></h1>
+<p class="lead">Hospedagem de imagens simples, anônima e de código aberto.</p>
+
+<h2>Como enviar</h2>
+<p>Envie uma imagem PNG, JPEG, GIF ou WebP de até {{.MaxUpload}}. A resposta traz o link público e um token para apagar depois.</p>
+<pre><code>curl -F "file=@captura.png" {{.BaseURL}}/v1/upload</code></pre>
+<p>Para apagar, use o <code>delete_url</code> e o <code>delete_token</code> que vieram na resposta:</p>
+<pre><code>curl -X DELETE -H "X-Delete-Token: SEU_TOKEN" {{.BaseURL}}/v1/files/ID</code></pre>
+
+<h2>Por quanto tempo a imagem fica?</h2>
+<p>Envios anônimos são gratuitos e <strong>não têm prazo garantido</strong>. O limite é o espaço em disco: quando ele acaba, as imagens mais antigas são apagadas primeiro para dar lugar às novas. Não prometemos nenhum tempo mínimo, então guarde uma cópia do que for importante.</p>
+<p>Chaves de API têm um período de retenção garantido. Durante esse período a imagem não é apagada para liberar espaço.</p>
+
+<h2>Privacidade e remoção</h2>
+<p>Não guardamos o seu IP: usamos apenas um hash dele para limitar abusos. Só aceitamos imagens rasterizadas (nada de SVG, HTML ou outros formatos).</p>
+<p>Quem tem o token de exclusão pode apagar a imagem a qualquer momento. Para pedir a remoção de uma imagem que não é sua (LGPD, direitos autorais, abuso), abra uma issue em <a href="https://github.com/vkdprojects/vkdl.link/issues">github.com/vkdprojects/vkdl.link/issues</a>. Se o conteúdo for sensível, não cole o link na issue: peça um contato privado.</p>
+
+<hr>
+
+<h2 lang="en">In English</h2>
+<div lang="en">
+<p><strong>vkdl.link</strong> is a simple, anonymous, open source image host. Upload a PNG, JPEG, GIF or WebP image up to {{.MaxUpload}}:</p>
+<pre><code>curl -F "file=@screenshot.png" {{.BaseURL}}/v1/upload</code></pre>
+<p>The JSON response contains the public <code>url</code>, a <code>delete_url</code> and a <code>delete_token</code>:</p>
+<pre><code>curl -X DELETE -H "X-Delete-Token: YOUR_TOKEN" {{.BaseURL}}/v1/files/ID</code></pre>
+<p><strong>Retention:</strong> anonymous uploads are free and have <strong>no guaranteed retention</strong>. Storage is the limit: when it runs out, the oldest images are deleted first. We never promise a minimum time, so keep a copy of anything important. API keys come with a guaranteed retention period.</p>
+<p><strong>Privacy and removal:</strong> we do not store your IP address, only a keyed hash of it for abuse prevention. Anyone holding the delete token can delete the image. To request removal of content that is not yours, open an issue at <a href="https://github.com/vkdprojects/vkdl.link/issues">github.com/vkdprojects/vkdl.link/issues</a> (ask for a private contact if the content is sensitive).</p>
+</div>
+
+<footer>
+<p>Software livre sob a licença <a href="https://www.gnu.org/licenses/agpl-3.0.html">AGPL-3.0</a>. Código-fonte / source code: <a href="https://github.com/vkdprojects/vkdl.link">github.com/vkdprojects/vkdl.link</a>.</p>
+</footer>
+</main>
+</body>
+</html>
