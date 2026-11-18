@@ -53,6 +53,13 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 	h.Set("Content-Disposition", `inline; filename="`+f.Key()+`"`)
 	h.Set("Referrer-Policy", "no-referrer")
 	h.Set("Access-Control-Allow-Origin", "*")
+	// Multi-range ("bytes=0-0,2-2,...") no S3 vira um GET por faixa, e o
+	// ServeContent só limita a soma dos tamanhos, não a quantidade: uma
+	// requisição faria centenas de GETs no bucket. Ninguém precisa disso para
+	// uma imagem; responde 200 com o corpo inteiro.
+	if strings.Contains(r.Header.Get("Range"), ",") {
+		r.Header.Del("Range")
+	}
 	// ServeContent cuida de Range, If-None-Match, If-Modified-Since e HEAD.
 	http.ServeContent(w, r, "", f.CreatedAt, rc)
 }

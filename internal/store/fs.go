@@ -3,14 +3,10 @@ package store
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
-
-	"github.com/vkdprojects/vkdl.link/internal/ident"
 )
 
 // FS guarda os arquivos em <root>/<id[0:2]>/<id>.<ext>.
@@ -32,11 +28,11 @@ func (s *FS) Root() string { return s.root }
 // path valida a chave e devolve o caminho no disco. Só aceita "<id>.<ext>",
 // o que impede qualquer tentativa de path traversal.
 func (s *FS) path(key string) (string, error) {
-	id, ext, ok := strings.Cut(key, ".")
-	if !ok || !ident.ValidFileID(id) || ext == "" || len(ext) > 5 || strings.ContainsAny(ext, `./\`) {
-		return "", fmt.Errorf("%w: %q", ErrInvalidKey, key)
+	rel, err := relPath(key)
+	if err != nil {
+		return "", err
 	}
-	return filepath.Join(s.root, id[:2], key), nil
+	return filepath.Join(s.root, filepath.FromSlash(rel)), nil
 }
 
 func (s *FS) Put(ctx context.Context, key string, r io.Reader) (int64, error) {
@@ -148,4 +144,43 @@ func (s *FS) Stat(ctx context.Context, key string) (Info, error) {
 		return Info{}, err
 	}
 	return Info{Size: fi.Size(), ModTime: fi.ModTime()}, nil
+}
+
+// List percorre os arquivos em ordem crescente de chave (os diretórios
+// <id[0:2]> e os nomes dentro deles saem ordenados de os.ReadDir). Ignora
+// temporários e qualquer arquivo fora do formato <id[0:2]>/<id>.<ext>.
+func (s *FS) List(ctx context.Context, fn func(key string, info Info) error) error {
+	dirs, err := os.ReadDir(s.root)
+	if err != nil {
+		return err
+	}
+	for _, d := range dirs {
+		if !d.IsDir() || len(d.Name()) != 2 {
+			continue
+		}
+		entries, err := os.ReadDir(filepath.Join(s.root, d.Name()))
+		if err != nil {
+			return err
+		}
+		for _, e := range entries {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			key, ok := keyFromRel(d.Name() + "/" + e.Name())
+			if !ok || !e.Type().IsRegular() {
+				continue
+			}
+			fi, err := e.Info()
+			if errors.Is(err, fs.ErrNotExist) {
+				continue // apagado durante a listagem
+			}
+			if err != nil {
+				return err
+			}
+			if err := fn(key, Info{Size: fi.Size(), ModTime: fi.ModTime()}); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

@@ -30,6 +30,34 @@ const multipartSlack = 1 << 20
 var (
 	errNoFile   = errors.New("nenhum arquivo enviado")
 	errTooLarge = errors.New("arquivo grande demais")
+	// errStorageTimeout indica que o armazenamento não terminou o envio (ou a
+	// trava do janitor não ficou livre) dentro do prazo.
+	errStorageTimeout = errors.New("o armazenamento não respondeu a tempo")
+)
+
+// Prazos da gravação de um envio. O WriteTimeout do http.Server (120 s) conta
+// desde o cabeçalho da requisição e não cancela o handler: um envio que
+// terminasse depois dele ficaria gravado e o cliente receberia uma resposta
+// vazia. Por isso o handler estende o prazo de escrita para cobrir estes
+// prazos mais uma folga, e o trabalho sempre acaba antes da resposta.
+const (
+	putBudgetBase = 20 * time.Second
+	putBudgetRate = 256 << 10 // bytes/s: a vazão mínima que esperamos do armazenamento
+	putBudgetMax  = 2 * time.Minute
+	// responseSlack cobre desfazer um envio que falhou (discardTimeout) e
+	// escrever a resposta depois do último prazo.
+	responseSlack  = 15 * time.Second
+	discardTimeout = 10 * time.Second
+)
+
+// Variáveis só para os testes poderem encurtá-las.
+var (
+	// putBudget é o prazo para levar size bytes ao armazenamento.
+	putBudget = func(size int64) time.Duration {
+		return min(putBudgetBase+time.Duration(size)*time.Second/putBudgetRate, putBudgetMax)
+	}
+	// reserveBudget é o prazo para esperar a trava do janitor e gravar a linha.
+	reserveBudget = 30 * time.Second
 )
 
 type uploadResponse struct {
@@ -112,7 +140,15 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		s.uploadReadError(w, err)
 		return
 	}
-	defer os.Remove(sp.path) // no sucesso o arquivo já foi movido; aí isso é um no-op
+	// no FS, o arquivo já foi movido e isso é um no-op; no S3 e em qualquer
+	// falha antes da adoção é aqui que o temporário some
+	defer os.Remove(sp.path)
+
+	// a resposta precisa poder sair depois de todo o trabalho (veja putBudget)
+	deadline := time.Now().Add(putBudget(sp.size) + reserveBudget + responseSlack)
+	if err := http.NewResponseController(w).SetWriteDeadline(deadline); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		s.log.Warn("estendendo o prazo da resposta do envio", "err", err)
+	}
 
 	now := s.opt.Now().UTC()
 	token := ident.NewDeleteToken()
@@ -133,11 +169,22 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	err = s.janitor.Reserve(ctx, f.Size, func(ctx context.Context) error { return s.commit(ctx, &f, sp.path) })
-	if errors.Is(err, janitor.ErrNoSpace) {
+	err = s.commit(ctx, &f, sp.path)
+	switch {
+	case err == nil:
+	case ctx.Err() != nil:
+		// o cliente desistiu (ou caiu): não há para quem responder, e commit
+		// já desfez o que tinha gravado
+		s.log.Info("envio abandonado pelo cliente", "size", f.Size, "err", err)
+		return
+	case errors.Is(err, janitor.ErrNoSpace):
 		writeError(w, http.StatusInsufficientStorage, "storage_full", "Sem espaço no servidor no momento. Tente mais tarde.")
 		return
-	} else if err != nil {
+	case errors.Is(err, errStorageTimeout):
+		s.log.Error("erro interno", "op", "gravando envio", "err", err)
+		writeError(w, http.StatusServiceUnavailable, "storage_timeout", "O armazenamento demorou demais para responder. Tente de novo.")
+		return
+	default:
 		s.internal(w, "gravando envio", err)
 		return
 	}
@@ -158,40 +205,94 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, resp)
 }
 
-// commit escolhe um id livre, grava a linha e depois move o arquivo para o
-// armazenamento. Roda com a trava do janitor, então a checagem de id não tem
-// corrida. A linha vem antes do arquivo de propósito: se o processo cair no
-// meio, sobra uma linha sem arquivo, que a reconciliação do boot remove; o
-// contrário (arquivo sem linha) ficaria invisível para o orçamento. O id só
-// chega ao cliente depois daqui, então ninguém vê o intervalo.
+// commit grava o envio: escolhe um id livre, leva o arquivo ao armazenamento
+// e só então, com a trava do janitor, abre espaço e grava a linha.
+//
+// O envio dos bytes fica fora da trava de propósito: no S3 ele leva o tempo
+// da rede, e com a trava cada envio esperaria todos os da fila (e o despejo e
+// os DELETE esperariam também). Se o processo cair entre o arquivo e a linha,
+// sobra um objeto sem linha, que a reconciliação do boot apaga depois de
+// OrphanMinAge (bem maior que putBudgetMax). Se qualquer passo falhar ou o
+// cliente desistir antes da linha, o objeto é apagado. O id só chega ao
+// cliente depois daqui, então ninguém vê o intervalo.
 func (s *Server) commit(ctx context.Context, f *db.File, spoolPath string) error {
+	id, release, err := s.claimID(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	f.ID = id
+
+	pctx, cancel := context.WithTimeout(ctx, putBudget(f.Size))
+	err = s.putFile(pctx, f.Key(), spoolPath)
+	err = budgetErr(ctx, pctx, err)
+	cancel()
+	if err == nil {
+		rctx, cancel := context.WithTimeout(ctx, reserveBudget)
+		err = s.janitor.Reserve(rctx, f.Size, func(ctx context.Context) error { return s.db.InsertFile(ctx, *f) })
+		err = budgetErr(ctx, rctx, err)
+		cancel()
+	}
+	if err != nil {
+		s.discard(ctx, f)
+		return err
+	}
+	return nil
+}
+
+// budgetErr marca com errStorageTimeout o erro de um passo que estourou o
+// próprio prazo (sub), desde que o cliente (parent) ainda esteja lá.
+func budgetErr(parent, sub context.Context, err error) error {
+	if err != nil && parent.Err() == nil && errors.Is(sub.Err(), context.DeadlineExceeded) {
+		return fmt.Errorf("%w: %w", errStorageTimeout, err)
+	}
+	return err
+}
+
+// discard apaga o objeto de um envio que não virou linha. Um PUT que falhou
+// por tempo esgotado pode ter chegado ao bucket mesmo assim; a chave é nova e
+// só deste envio (claimID), então apagar é seguro. Roda com prazo curto e sem
+// a trava; se falhar, a reconciliação do boot pega o órfão.
+func (s *Server) discard(ctx context.Context, f *db.File) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), discardTimeout)
+	defer cancel()
+	if err := s.store.Delete(ctx, f.Key()); err != nil && !errors.Is(err, store.ErrNotFound) {
+		s.log.Warn("apagando objeto de envio que falhou", "id", f.ID, "err", err)
+	}
+}
+
+// claimID escolhe um id que não está no banco nem em outro envio em
+// andamento e o reserva até release. Como o arquivo vai ao armazenamento antes
+// da linha, sem a reserva dois envios simultâneos com o mesmo id gravariam na
+// mesma chave, e o que falhasse no banco apagaria o arquivo do outro.
+func (s *Server) claimID(ctx context.Context) (string, func(), error) {
+	s.idMu.Lock()
+	defer s.idMu.Unlock()
 	for range 10 {
-		f.ID = ident.NewFileID()
-		exists, err := s.db.FileExists(ctx, f.ID)
+		id := ident.NewFileID()
+		if _, busy := s.pendingIDs[id]; busy {
+			continue
+		}
+		exists, err := s.db.FileExists(ctx, id)
 		if err != nil {
-			return err
+			return "", nil, err
 		}
 		if exists {
 			continue
 		}
-		err = s.db.InsertFile(ctx, *f)
-		if errors.Is(err, db.ErrConflict) {
-			continue // não deveria acontecer com a trava, mas não custa
-		}
-		if err != nil {
-			return err
-		}
-		if err := s.putFile(ctx, f.Key(), spoolPath); err != nil {
-			if derr := s.db.DeleteFile(ctx, f.ID); derr != nil {
-				s.log.Error("desfazendo linha de envio que falhou", "id", f.ID, "err", derr)
-			}
-			return err
-		}
-		return nil
+		s.pendingIDs[id] = struct{}{}
+		return id, func() {
+			s.idMu.Lock()
+			delete(s.pendingIDs, id)
+			s.idMu.Unlock()
+		}, nil
 	}
-	return errors.New("não foi possível gerar um id livre")
+	return "", nil, errors.New("não foi possível gerar um id livre")
 }
 
+// putFile leva o temporário do spool para o armazenamento: rename no disco
+// (FileAdopter) ou envio dos bytes (S3). Em qualquer caso quem chama apaga o
+// temporário depois (handleUpload faz isso com defer).
 func (s *Server) putFile(ctx context.Context, key, path string) error {
 	if a, ok := s.store.(store.FileAdopter); ok {
 		return a.Adopt(ctx, key, path)

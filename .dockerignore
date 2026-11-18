@@ -10,3 +10,7 @@ vkdl
 *.out
 .env
 .env.*
+
+# segredos locais (o estágio de build faz COPY . .)
+.env
+.env.*

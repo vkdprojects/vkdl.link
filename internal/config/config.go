@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"net/netip"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -27,6 +28,26 @@ type Config struct {
 	TrustedProxies     []netip.Prefix // VKDL_TRUSTED_PROXIES: faixas (CIDR) da borda que pode enviar o cabeçalho acima
 	CFZoneID           string         // VKDL_CF_ZONE_ID: com CFAPIToken, purga o cache da Cloudflare ao apagar
 	CFAPIToken         string         // VKDL_CF_API_TOKEN (permissão Cache Purge); nunca logar
+	Storage            string         // VKDL_STORAGE: StorageFS ou StorageS3
+	S3                 S3             // preenchido só quando Storage == StorageS3
+}
+
+// Backends de armazenamento aceitos em VKDL_STORAGE.
+const (
+	StorageFS = "fs"
+	StorageS3 = "s3"
+)
+
+// S3 é a configuração do bucket (variáveis S3_*).
+type S3 struct {
+	Endpoint  string // host[:porta], sem esquema
+	Region    string // vazio = descoberta automática
+	Bucket    string
+	KeyID     string // nunca logar
+	KeySecret string // nunca logar
+	Prefix    string
+	UseSSL    bool
+	PathStyle string // "auto", "true" ou "false"
 }
 
 // FromEnv monta a Config usando os.Getenv.
@@ -76,6 +97,9 @@ func Load(getenv func(string) string) (Config, error) {
 	if c.RateKey, err = parseRate(get("VKDL_RATE_KEY", "300")); err != nil {
 		return c, fmt.Errorf("VKDL_RATE_KEY: %w", err)
 	}
+	if err := loadStorage(&c, getenv); err != nil {
+		return c, err
+	}
 	if s := getenv("VKDL_SECRET"); s != "" {
 		c.Secret = []byte(s)
 	} else {
@@ -84,6 +108,77 @@ func Load(getenv func(string) string) (Config, error) {
 		c.SecretGenerated = true
 	}
 	return c, nil
+}
+
+// loadStorage escolhe o backend e, para S3, lê e valida as variáveis S3_*.
+// Os erros citam o nome da variável, nunca o valor (pode ser credencial).
+func loadStorage(c *Config, getenv func(string) string) error {
+	env := func(k string) string { return strings.TrimSpace(getenv(k)) }
+	c.Storage = strings.ToLower(env("VKDL_STORAGE"))
+	switch c.Storage {
+	case "":
+		c.Storage = StorageFS
+		if env("S3_BUCKET") != "" {
+			c.Storage = StorageS3
+		}
+	case StorageFS, StorageS3:
+	default:
+		return fmt.Errorf("VKDL_STORAGE: valor inválido %q (use fs ou s3)", c.Storage)
+	}
+	if c.Storage != StorageS3 {
+		return nil
+	}
+	s := S3{
+		Region:    env("S3_REGION"),
+		Bucket:    env("S3_BUCKET"),
+		KeyID:     env("S3_KEY_ID"),
+		KeySecret: env("S3_KEY_SECRET"),
+		Prefix:    env("S3_PREFIX"),
+		UseSSL:    true,
+		PathStyle: strings.ToLower(env("S3_PATH_STYLE")),
+	}
+	for _, k := range []string{"S3_ENDPOINT", "S3_BUCKET", "S3_KEY_ID", "S3_KEY_SECRET"} {
+		if env(k) == "" {
+			return fmt.Errorf("%s: obrigatória com o armazenamento s3", k)
+		}
+	}
+	if v := env("S3_USE_SSL"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("S3_USE_SSL: use true ou false")
+		}
+		s.UseSSL = b
+	}
+	endpoint := env("S3_ENDPOINT")
+	if strings.Contains(endpoint, "://") {
+		u, err := url.Parse(endpoint)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("S3_ENDPOINT: use host[:porta] ou http(s)://host[:porta]")
+		}
+		if u.User != nil {
+			return fmt.Errorf("S3_ENDPOINT: não coloque credenciais na URL; use S3_KEY_ID e S3_KEY_SECRET")
+		}
+		if strings.Trim(u.Path, "/") != "" || u.RawQuery != "" || u.Fragment != "" {
+			return fmt.Errorf("S3_ENDPOINT: não pode ter caminho; o bucket vai em S3_BUCKET e o prefixo em S3_PREFIX")
+		}
+		ssl := u.Scheme == "https"
+		if env("S3_USE_SSL") != "" && s.UseSSL != ssl {
+			return fmt.Errorf("S3_USE_SSL contradiz o esquema de S3_ENDPOINT")
+		}
+		s.UseSSL, endpoint = ssl, u.Host
+	} else if strings.ContainsAny(endpoint, "/@?# ") {
+		return fmt.Errorf("S3_ENDPOINT: use host[:porta] ou http(s)://host[:porta]")
+	}
+	s.Endpoint = endpoint
+	switch s.PathStyle {
+	case "":
+		s.PathStyle = "auto"
+	case "auto", "true", "false":
+	default:
+		return fmt.Errorf("S3_PATH_STYLE: use auto, true ou false")
+	}
+	c.S3 = s
+	return nil
 }
 
 func parseRate(s string) (int, error) {

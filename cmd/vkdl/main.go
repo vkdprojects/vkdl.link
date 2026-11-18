@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -41,35 +42,54 @@ func run(log *slog.Logger) error {
 		log.Info("VKDL_ADMIN_TOKEN vazio: API de admin desativada")
 	}
 
-	filesDir := filepath.Join(cfg.DataDir, "files")
 	spoolDir := filepath.Join(cfg.DataDir, "tmp")
-	for _, d := range []string{cfg.DataDir, filesDir, spoolDir} {
+	for _, d := range []string{cfg.DataDir, spoolDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return err
 		}
 	}
 	cleanSpool(log, spoolDir)
 
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+	defer stop()
+
 	database, err := db.Open(filepath.Join(cfg.DataDir, "vkdl.db"))
 	if err != nil {
 		return err
 	}
 	defer database.Close()
-	st, err := store.NewFS(filesDir)
-	if err != nil {
-		return err
-	}
 
 	jan := &janitor.Janitor{
-		DB:          database,
-		Store:       st,
-		MaxStorage:  cfg.MaxStorage,
-		MinFreeDisk: cfg.MinFreeDisk,
-		DiskFree:    janitor.DiskFree(cfg.DataDir),
-		Log:         log,
+		DB:         database,
+		MaxStorage: cfg.MaxStorage,
+		Log:        log,
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
-	defer stop()
+	var st store.Store
+	switch cfg.Storage {
+	case config.StorageS3:
+		s3, err := openS3(ctx, cfg.S3)
+		if err != nil {
+			return err
+		}
+		st = s3
+		log.Info("armazenamento: s3", "endpoint", s3.Endpoint(), "bucket", s3.Bucket(), "prefix", s3.Prefix(),
+			"ssl", cfg.S3.UseSSL, "path_style", cfg.S3.PathStyle)
+		if cfg.MaxStorage <= 0 {
+			log.Warn("VKDL_MAX_STORAGE=0 com s3: nada limita o tamanho do bucket")
+		}
+	default:
+		filesDir := filepath.Join(cfg.DataDir, "files")
+		fs, err := store.NewFS(filesDir)
+		if err != nil {
+			return err
+		}
+		st = fs
+		// o disco local só importa quando os arquivos moram nele
+		jan.MinFreeDisk = cfg.MinFreeDisk
+		jan.DiskFree = janitor.DiskFree(cfg.DataDir)
+		log.Info("armazenamento: disco", "dir", filesDir)
+	}
+	jan.Store = st
 
 	if n, err := jan.Reconcile(ctx); err != nil {
 		return err
@@ -114,7 +134,7 @@ func run(log *slog.Logger) error {
 	errc := make(chan error, 1)
 	go func() {
 		log.Info("ouvindo", "addr", cfg.Listen, "base_url", cfg.BaseURL, "data_dir", cfg.DataDir,
-			"max_storage", cfg.MaxStorage, "max_upload", cfg.MaxUpload)
+			"storage", cfg.Storage, "max_storage", cfg.MaxStorage, "max_upload", cfg.MaxUpload)
 		errc <- httpSrv.ListenAndServe()
 	}()
 
@@ -129,6 +149,31 @@ func run(log *slog.Logger) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	return httpSrv.Shutdown(shutdownCtx)
+}
+
+// openS3 cria o armazenamento S3 e confere, com prazo curto, se o bucket
+// responde. Falhar aqui derruba o boot: melhor que aceitar envios que não
+// têm para onde ir. As mensagens nunca incluem as credenciais.
+func openS3(ctx context.Context, c config.S3) (*store.S3, error) {
+	s3, err := store.NewS3(store.S3Config{
+		Endpoint:  c.Endpoint,
+		Region:    c.Region,
+		Bucket:    c.Bucket,
+		KeyID:     c.KeyID,
+		KeySecret: c.KeySecret,
+		Prefix:    c.Prefix,
+		UseSSL:    c.UseSSL,
+		PathStyle: store.PathStyle(c.PathStyle),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("configuração do S3 inválida: %w", err)
+	}
+	cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	if err := s3.Check(cctx); err != nil {
+		return nil, fmt.Errorf("bucket S3 inacessível (confira S3_ENDPOINT, S3_REGION, S3_BUCKET e as credenciais): %w", err)
+	}
+	return s3, nil
 }
 
 // cleanSpool apaga envios temporários deixados por um processo que morreu no meio.

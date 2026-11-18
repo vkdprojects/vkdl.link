@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -337,5 +338,49 @@ func TestReconcileRemovesTruncatedFile(t *testing.T) {
 	}
 	if !f.exists("anon0001") || f.exists("anon0002") {
 		t.Error("Reconcile devia remover só o truncado (linha e arquivo)")
+	}
+}
+
+// Quem desiste enquanto espera a trava sai da fila sem gravar nada.
+func TestReserveGivesUpWhileWaitingForLock(t *testing.T) {
+	f := newFixture(t, 1000)
+	held, done := make(chan struct{}), make(chan struct{})
+	go f.j.Reserve(context.Background(), 0, func(context.Context) error { close(held); <-done; return nil })
+	<-held
+	defer close(done)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	errc := make(chan error, 2)
+	var called atomic.Bool
+	go func() { errc <- f.j.Reserve(ctx, 10, func(context.Context) error { called.Store(true); return nil }) }()
+	go func() { errc <- f.j.Sweep(ctx) }()
+	for range 2 {
+		select {
+		case err := <-errc:
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("Reserve/Sweep = %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("Reserve/Sweep continuaram esperando a trava depois de o contexto acabar")
+		}
+	}
+	if called.Load() {
+		t.Fatal("commit rodou para quem desistiu")
+	}
+}
+
+// Contexto já cancelado com a trava livre: commit não roda.
+func TestReserveCancelledBeforeLock(t *testing.T) {
+	f := newFixture(t, 1000)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	called := false
+	if err := f.j.Reserve(ctx, 10, func(context.Context) error { called = true; return nil }); !errors.Is(err, context.Canceled) || called {
+		t.Fatalf("Reserve = %v, commit chamado=%v", err, called)
+	}
+	// a trava não ficou presa
+	if err := f.j.Reserve(context.Background(), 10, func(context.Context) error { return nil }); err != nil {
+		t.Fatal(err)
 	}
 }

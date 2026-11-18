@@ -15,18 +15,23 @@ import (
 	"github.com/vkdprojects/vkdl.link/internal/store"
 )
 
-// orderStore registra se a linha já existia no banco quando o arquivo foi
-// adotado, e pode simular falha na adoção.
+// orderStore registra se a linha já existia no banco e se a trava do janitor
+// estava livre quando o arquivo foi adotado, e pode simular falha na adoção.
 type orderStore struct {
 	*store.FS
 	db         *db.DB
+	jan        *janitor.Janitor
 	rowAtAdopt bool
+	lockFree   bool
 	fail       error
 }
 
 func (o *orderStore) Adopt(ctx context.Context, key, src string) error {
 	id, _, _ := strings.Cut(key, ".")
 	o.rowAtAdopt, _ = o.db.FileExists(ctx, id)
+	sctx, cancel := context.WithTimeout(ctx, time.Second)
+	o.lockFree = o.jan.Sweep(sctx) == nil // com a trava ocupada, Sweep desiste com o prazo
+	cancel()
 	if o.fail != nil {
 		return o.fail
 	}
@@ -42,18 +47,26 @@ func spoolFile(t *testing.T, dir string) string {
 	return p
 }
 
-// A linha precisa existir antes do arquivo chegar ao armazenamento: uma queda
-// no meio deixa só uma linha órfã (que o boot remove), nunca um arquivo invisível.
-func TestCommitInsertsRowBeforeFile(t *testing.T) {
+// O arquivo vai ao armazenamento antes da linha e sem a trava do janitor: no
+// S3 o PUT leva o tempo da rede, e com a trava cada envio esperaria todos os
+// da fila (e DELETE e despejo também). Uma queda no meio deixa um objeto sem
+// linha, que a reconciliação do boot apaga.
+func TestCommitStoresFileBeforeRowWithoutLock(t *testing.T) {
 	e := newEnv(t)
-	ost := &orderStore{FS: e.st, db: e.db}
+	ost := &orderStore{FS: e.st, db: e.db, jan: e.jan}
 	s := New(Options{SpoolDir: e.spool}, e.db, ost, e.jan)
 	f := db.File{Ext: "png", MIME: "image/png", Size: int64(len(pngBytes(t))), SHA256: "s", DeleteTokenHash: "d", CreatedAt: time.Now()}
 	if err := s.commit(context.Background(), &f, spoolFile(t, e.spool)); err != nil {
 		t.Fatal(err)
 	}
-	if !ost.rowAtAdopt {
-		t.Fatal("o arquivo foi adotado antes da linha existir")
+	if ost.rowAtAdopt {
+		t.Fatal("a linha devia ser gravada só depois do arquivo")
+	}
+	if !ost.lockFree {
+		t.Fatal("o arquivo foi enviado com a trava do janitor ocupada")
+	}
+	if ok, _ := e.db.FileExists(context.Background(), f.ID); !ok {
+		t.Fatal("a linha não foi gravada")
 	}
 	if _, err := e.st.Stat(context.Background(), f.Key()); err != nil {
 		t.Fatalf("arquivo não foi adotado: %v", err)
@@ -63,7 +76,7 @@ func TestCommitInsertsRowBeforeFile(t *testing.T) {
 func TestCommitRollsBackRowWhenFileFails(t *testing.T) {
 	e := newEnv(t)
 	boom := errors.New("disco falhou")
-	ost := &orderStore{FS: e.st, db: e.db, fail: boom}
+	ost := &orderStore{FS: e.st, db: e.db, jan: e.jan, fail: boom}
 	s := New(Options{SpoolDir: e.spool}, e.db, ost, e.jan)
 	f := db.File{Ext: "png", MIME: "image/png", Size: 10, SHA256: "s", DeleteTokenHash: "d", CreatedAt: time.Now()}
 	if err := s.commit(context.Background(), &f, spoolFile(t, e.spool)); !errors.Is(err, boom) {

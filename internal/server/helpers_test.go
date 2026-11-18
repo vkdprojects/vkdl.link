@@ -63,6 +63,12 @@ type envOpt func(*Options, *janitor.Janitor)
 
 func newEnv(t *testing.T, opts ...envOpt) *env {
 	t.Helper()
+	return newEnvWith(t, nil, opts...)
+}
+
+// newEnvWith é newEnv com um ajuste no http.Server antes de subir (ex.: WriteTimeout).
+func newEnvWith(t *testing.T, srvCfg func(*http.Server), opts ...envOpt) *env {
+	t.Helper()
 	dir := t.TempDir()
 	d, err := db.Open(filepath.Join(dir, "vkdl.db"))
 	if err != nil {
@@ -96,7 +102,12 @@ func newEnv(t *testing.T, opts ...envOpt) *env {
 	for _, fn := range opts {
 		fn(&o, e.jan)
 	}
-	e.ts = httptest.NewServer(New(o, d, st, e.jan).Handler())
+	// uma opção pode trocar o armazenamento via j.Store (ex.: um sem Adopt, como o S3)
+	e.ts = httptest.NewUnstartedServer(New(o, d, e.jan.Store, e.jan).Handler())
+	if srvCfg != nil {
+		srvCfg(e.ts.Config)
+	}
+	e.ts.Start()
 	t.Cleanup(e.ts.Close)
 	return e
 }

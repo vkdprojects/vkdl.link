@@ -8,14 +8,16 @@ dos envios do [Recortei](https://github.com/FabioHAraujo/Recortei).
 - Só imagens rasterizadas: **PNG, JPEG, GIF e WebP**, identificadas pelos bytes
   do arquivo (nunca pelo nome ou Content-Type). SVG e qualquer outra coisa são recusados.
 - Sem IP guardado: logs e banco só têm um HMAC do IP.
-- Um único binário Go + SQLite, sem dependências externas.
+- Um único binário Go + SQLite. As imagens ficam no disco ou, opcionalmente,
+  num bucket compatível com S3 (AWS, iDrive e2, MinIO, Garage...).
 
 ## Retenção: por quanto tempo a imagem fica?
 
 Envios **anônimos** são gratuitos e **não têm prazo garantido**. O limite é o
-armazenamento: quando o orçamento de disco (`VKDL_MAX_STORAGE`) é ultrapassado,
-ou o espaço livre no volume cai abaixo de `VKDL_MIN_FREE_DISK`, os arquivos
-despejáveis **mais antigos** são apagados primeiro. Nunca prometemos um tempo.
+armazenamento: quando o orçamento (`VKDL_MAX_STORAGE`) é ultrapassado, ou (no
+armazenamento em disco) o espaço livre no volume cai abaixo de
+`VKDL_MIN_FREE_DISK`, os arquivos despejáveis **mais antigos** são apagados
+primeiro. Nunca prometemos um tempo.
 
 **Chaves de API** têm um período de retenção garantido (`retention_days`; 0 =
 para sempre). Um arquivo enviado com chave não é despejado até `expires_at`;
@@ -107,7 +109,7 @@ curl -H "$ADM" -d '{"name":"cliente X","retention_days":30}' https://vkdl.link/v
 curl -H "$ADM" https://vkdl.link/v1/admin/keys
 curl -H "$ADM" -X DELETE https://vkdl.link/v1/admin/keys/<id>
 
-# números: arquivos, bytes, orçamento, disco livre, bytes despejáveis
+# números: arquivos, bytes, orçamento, disco livre (só no armazenamento em disco), bytes despejáveis
 curl -H "$ADM" https://vkdl.link/v1/admin/stats
 
 # apagar qualquer arquivo
@@ -128,9 +130,10 @@ Tudo por variáveis de ambiente:
 |---|---|---|
 | `VKDL_LISTEN` | `:8080` | endereço de escuta |
 | `VKDL_BASE_URL` | `http://localhost:8080` | origem pública usada para montar os links (produção: `https://vkdl.link`) |
-| `VKDL_DATA_DIR` | `./data` (no container: `/data`) | arquivos + SQLite |
+| `VKDL_DATA_DIR` | `./data` (no container: `/data`) | SQLite, temporários de envio e (com `fs`) os arquivos |
+| `VKDL_STORAGE` | `s3` se `S3_BUCKET` estiver definido, senão `fs` | onde ficam as imagens; veja [Armazenamento](#armazenamento-disco-ou-s3) |
 | `VKDL_MAX_STORAGE` | `10GB` | orçamento total de bytes (aceita KB/MB/GB/TB, base 1024; `0` desliga) |
-| `VKDL_MIN_FREE_DISK` | `1GB` | despeja quando o espaço livre do volume cai abaixo disso (`0` desliga) |
+| `VKDL_MIN_FREE_DISK` | `1GB` | só com `fs`: despeja quando o espaço livre do volume cai abaixo disso (`0` desliga) |
 | `VKDL_MAX_UPLOAD` | `20MB` | tamanho máximo de um envio |
 | `VKDL_ADMIN_TOKEN` | vazio (admin desligado) | bearer token de `/v1/admin/*` |
 | `VKDL_SECRET` | aleatório a cada boot (com aviso) | segredo do HMAC dos IPs |
@@ -156,6 +159,93 @@ trocar o segredo só muda os hashes de IP.
 > cabeçalho que ele sempre sobrescreve. O limitador guarda no máximo 100 mil
 > IPs; acima disso os IPs novos dividem um único balde.
 
+## Armazenamento: disco ou S3
+
+Os **metadados** (arquivos, chaves de API) ficam sempre no SQLite em
+`VKDL_DATA_DIR/vkdl.db`, e os envios passam por `VKDL_DATA_DIR/tmp` antes de
+irem para o destino. Por isso `/data` continua precisando de um volume
+persistente mesmo com S3. Já as **imagens** podem ficar em dois lugares:
+
+- **`fs`** (padrão sem `S3_BUCKET`): em `VKDL_DATA_DIR/files/<id[0:2]>/<id>.<ext>`.
+  O despejo considera `VKDL_MAX_STORAGE` e `VKDL_MIN_FREE_DISK`.
+- **`s3`** (padrão quando `S3_BUCKET` está definido): num bucket compatível com
+  S3, em `<S3_PREFIX><id[0:2]>/<id>.<ext>` (o mesmo layout do disco). O disco
+  local só guarda o banco e os temporários, então **só `VKDL_MAX_STORAGE`**
+  limita o tamanho; `VKDL_MIN_FREE_DISK` é ignorado. O bucket pode (e deve)
+  ser privado: as imagens são servidas pelo próprio vkdl.
+
+| variável | padrão | significado |
+|---|---|---|
+| `S3_ENDPOINT` | — (obrigatória) | host do serviço, ex. `s3.us-east-1.idrivee2.com`; aceita também `http://host:porta` ou `https://host`, e aí o esquema define o TLS |
+| `S3_REGION` | vazio (descobre sozinho) | região do bucket, ex. `us-east-1` |
+| `S3_BUCKET` | — (obrigatória) | nome do bucket (precisa existir) |
+| `S3_KEY_ID` | — (obrigatória) | access key id; nunca vai para o log |
+| `S3_KEY_SECRET` | — (obrigatória) | secret access key; nunca vai para o log |
+| `S3_PREFIX` | vazio | "pasta" dentro do bucket, ex. `vkdl/` |
+| `S3_USE_SSL` | `true` | `false` para endpoints HTTP (MinIO/Garage na rede interna) |
+| `S3_PATH_STYLE` | `auto` | `true` = `endpoint/bucket/chave` (MinIO, Garage); `false` = `bucket.endpoint/chave`; `auto` escolhe sozinho (virtual na AWS, caminho no resto) |
+
+No boot o servidor confere se o bucket responde (até 15 s) e **não sobe** se
+não conseguir, com uma mensagem que cita a variável a conferir (nunca o valor
+das credenciais). O log de boot mostra o endpoint, o bucket e o prefixo em uso.
+
+> **O bucket (ou o prefixo) é exclusivo da instância.** No boot, a
+> reconciliação apaga linhas do banco cujo objeto sumiu e também objetos no
+> formato `<id[0:2]>/<id>.<ext>` dentro do prefixo que não têm linha no banco e
+> têm mais de 10 minutos. Duas instâncias com bancos diferentes no mesmo
+> bucket+prefixo apagariam os arquivos uma da outra. Objetos fora desse formato
+> nunca são tocados. Se o armazenamento estiver vazio e o banco não, nada é
+> apagado (quase sempre é bucket/prefixo errado) e o log registra um erro.
+>
+> O contrário também é protegido: se o **banco estiver vazio** (volume novo,
+> `VKDL_DATA_DIR` errado) ou não conhecer **mais da metade** dos objetos
+> listados (backup antigo do banco, banco de outra instância), nenhum objeto é
+> apagado e o log registra um erro. Confira o volume e o bucket/prefixo antes
+> de reiniciar; os objetos sem linha não aparecem no site, mas continuam lá.
+
+Com S3, o envio dos bytes ao bucket acontece fora da fila do despejo, com um
+prazo proporcional ao tamanho (20 s + 1 s a cada 256 KiB, no máximo 2 min).
+Se o bucket não responder a tempo, o cliente recebe `503 storage_timeout` e
+nada fica gravado; GET/HEAD de arquivos desistem em segundos (15 s pelos
+cabeçalhos, até 3 tentativas) em vez de ficarem presos. Requisições com várias
+faixas (`Range: bytes=0-0,5-5,...`) recebem o arquivo inteiro com 200, e cada
+GET no bucket pede no máximo 4 MiB.
+
+Exemplos:
+
+```sh
+# iDrive e2 (o endpoint e a região aparecem no painel do bucket)
+S3_ENDPOINT=s3.us-east-1.idrivee2.com
+S3_REGION=us-east-1
+S3_BUCKET=meu-bucket
+S3_KEY_ID=...
+S3_KEY_SECRET=...
+
+# MinIO na mesma rede Docker
+S3_ENDPOINT=http://minio:9000
+S3_REGION=us-east-1
+S3_BUCKET=vkdl
+S3_PATH_STYLE=true
+S3_KEY_ID=...
+S3_KEY_SECRET=...
+
+# Garage (região "garage" por padrão no garage.toml)
+S3_ENDPOINT=http://garage:3900
+S3_REGION=garage
+S3_BUCKET=vkdl
+S3_PATH_STYLE=true
+S3_KEY_ID=GK...
+S3_KEY_SECRET=...
+```
+
+**Migrando de `fs` para `s3`:** pare o servidor, copie o conteúdo de
+`/data/files` para dentro do prefixo do bucket mantendo os caminhos (ex.:
+`rclone copy /data/files remoto:bucket/prefixo` ou
+`aws s3 sync /data/files s3://bucket/prefixo --endpoint-url https://...`), defina
+as variáveis `S3_*` e suba de novo com o mesmo `/data` (o banco continua lá).
+Linhas cujo arquivo não foi copiado são removidas na reconciliação do boot;
+depois de conferir, `/data/files` pode ser apagado.
+
 ## Hospedando você mesmo (Docker)
 
 ```sh
@@ -173,9 +263,13 @@ e já traz `/data` com o dono certo, então um volume nomeado novo funciona sem
 `chown`. Tem `HEALTHCHECK` com `wget` em `/healthz`. Ao receber `SIGTERM` o
 servidor termina as requisições em andamento antes de sair.
 
+Com S3, acrescente as variáveis `S3_*` (por exemplo com `--env-file`); o
+volume em `/data` continua necessário para o banco.
+
 No Coolify: aplicação a partir do repositório usando o `Dockerfile`, porta
 `8080`, volume persistente em `/data`, healthcheck em `/healthz` e as variáveis
-acima (pelo menos `VKDL_BASE_URL`, `VKDL_SECRET` e `VKDL_ADMIN_TOKEN`).
+acima (pelo menos `VKDL_BASE_URL`, `VKDL_SECRET` e `VKDL_ADMIN_TOKEN`, mais as
+`S3_*` se for usar S3).
 
 ### Restringindo a origem à Cloudflare (opcional)
 
@@ -228,14 +322,24 @@ go vet ./...
 go test ./...
 ```
 
+O teste de integração do S3 só roda com `VKDL_TEST_S3=1` e usa as mesmas
+variáveis `S3_*` do servidor. Ele grava tudo num subprefixo aleatório
+(`<S3_PREFIX>it-<aleatório>/`), apaga no fim e confere que não sobrou nada:
+
+```sh
+VKDL_TEST_S3=1 S3_ENDPOINT=http://127.0.0.1:9000 S3_BUCKET=vkdl-test \
+  S3_KEY_ID=... S3_KEY_SECRET=... S3_PREFIX=vkdl-ci-test/ \
+  go test ./internal/store/ -run S3Integration -v
+```
+
 Estrutura:
 
 ```
 cmd/vkdl/            main: configuração, boot, desligamento gracioso
 internal/config/     variáveis de ambiente e tamanhos ("20MB")
 internal/db/         SQLite (modernc.org/sqlite, sem CGO): arquivos e chaves
-internal/store/      armazenamento (interface; implementação em disco)
-internal/janitor/    despejo por orçamento/disco e reconciliação no boot
+internal/store/      armazenamento (interface; em disco e em S3 com minio-go)
+internal/janitor/    despejo por orçamento/disco e reconciliação no boot (linhas e objetos órfãos)
 internal/ratelimit/  limite de envios por minuto
 internal/cdn/        purga do cache da Cloudflare ao apagar
 internal/sniff/      detecção de formato por bytes mágicos

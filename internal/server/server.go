@@ -43,6 +43,9 @@ type Server struct {
 
 	pageOnce sync.Once
 	page     []byte // HTML da página inicial, renderizado uma vez
+
+	idMu       sync.Mutex
+	pendingIDs map[string]struct{} // ids de envios em andamento (veja claimID)
 }
 
 // New cria o Server.
@@ -61,6 +64,8 @@ func New(opt Options, d *db.DB, st store.Store, j *janitor.Janitor) *Server {
 		anonRL:  ratelimit.NewWithClock(opt.RateAnon, opt.Now),
 		keyRL:   ratelimit.NewWithClock(opt.RateKey, opt.Now),
 		log:     opt.Log,
+
+		pendingIDs: map[string]struct{}{},
 	}
 }
 
