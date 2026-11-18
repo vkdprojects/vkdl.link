@@ -42,7 +42,7 @@ type Server struct {
 	log     *slog.Logger
 
 	pageOnce sync.Once
-	page     []byte // HTML da página inicial, renderizado uma vez
+	page     renderedPage // página inicial e sua CSP, renderizadas uma vez
 
 	idMu       sync.Mutex
 	pendingIDs map[string]struct{} // ids de envios em andamento (veja claimID)

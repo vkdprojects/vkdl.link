@@ -3,61 +3,753 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>vkdl.link</title>
-<meta name="description" content="Hospedagem de imagens simples e de código aberto.">
+<title>vkdl.link: compartilhe imagens com um link</title>
+<meta name="description" content="Envie uma imagem e receba um link para compartilhar. Grátis, sem cadastro e de código aberto.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f6f8f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f1312" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230f766e'/%3E%3Cg fill='none' stroke='%23fff' stroke-width='2.6' stroke-linecap='round'%3E%3Cpath d='M14 18a4.5 4.5 0 0 0 6.4.4l3-3a4.5 4.5 0 0 0-6.4-6.4l-1.5 1.5'/%3E%3Cpath d='M18 14a4.5 4.5 0 0 0-6.4-.4l-3 3a4.5 4.5 0 0 0 6.4 6.4l1.5-1.5'/%3E%3C/g%3E%3C/svg%3E">
 <style>
-:root{--bg:#fafaf9;--fg:#1c1917;--muted:#57534e;--line:#e7e5e4;--code:#f0efed;--accent:#0f766e}
-@media (prefers-color-scheme:dark){:root{--bg:#141414;--fg:#ececec;--muted:#a3a3a3;--line:#2b2b2b;--code:#1f1f1f;--accent:#5eead4}}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-main{max-width:46rem;margin:0 auto;padding:3rem 1rem 4rem}
-h1{font-size:2rem;margin:0 0 .25rem;letter-spacing:-.02em}
-h1 span{color:var(--accent)}
-h2{font-size:1.1rem;margin:2.25rem 0 .5rem}
-p,li{color:var(--fg)}
-.lead{color:var(--muted);margin-top:0}
-pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:.85rem 1rem;overflow-x:auto;font-size:.875rem;line-height:1.5}
-code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em}
-p code,li code{background:var(--code);padding:.1em .35em;border-radius:4px}
-a{color:var(--accent)}
-hr{border:0;border-top:1px solid var(--line);margin:3rem 0}
-footer{color:var(--muted);font-size:.875rem;margin-top:3rem}
+:root{
+  --bg:#f6f8f7;--bg-glow:#d5efe9;--surface:#fff;--fg:#14201d;--muted:#4d5c58;--line:#dbe3e0;--line-strong:#7d8e89;
+  --accent:#0f766e;--accent-fg:#fff;--accent-hover:#0b5f58;--accent-soft:#e3f4f0;--code:#f0f4f2;
+  --warn-bg:#fff7e6;--warn-line:#f0c46c;--warn-fg:#6b4500;--danger:#b42318;--danger-soft:#fdecea;--ok:#127a3a;
+  --focus:#0f766e;--shadow:0 1px 2px rgb(16 40 34/.06),0 8px 28px rgb(16 40 34/.08);
+  --radius:16px;--mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0f1312;--bg-glow:#123430;--surface:#171d1c;--fg:#e8eeec;--muted:#a3b1ad;--line:#2a3532;--line-strong:#62746f;
+  --accent:#5eead4;--accent-fg:#06201c;--accent-hover:#99f6e4;--accent-soft:#163632;--code:#111816;
+  --warn-bg:#2b2311;--warn-line:#7a5d1c;--warn-fg:#f5d48a;--danger:#ff8a80;--danger-soft:#3a1715;--ok:#6ee7a0;
+  --focus:#5eead4;--shadow:0 1px 2px rgb(0 0 0/.3),0 10px 30px rgb(0 0 0/.35)
+}}
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+body{margin:0;min-height:100vh;background:var(--bg) radial-gradient(60rem 26rem at 50% -8rem,var(--bg-glow),transparent 70%) no-repeat;color:var(--fg);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;overflow-wrap:break-word}
+a{color:var(--accent);text-underline-offset:.18em}
+a:hover{color:var(--accent-hover)}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px;border-radius:6px}
+h1,h2,h3{line-height:1.2;letter-spacing:-.015em;margin:0}
+p{margin:0 0 .75rem}
+p:last-child{margin-bottom:0}
+code,kbd,pre{font-family:var(--mono)}
+kbd{font-size:.8em;padding:.1em .4em;border:1px solid var(--line-strong);border-bottom-width:2px;border-radius:5px;background:var(--surface);white-space:nowrap}
+[hidden]{display:none!important}
+:root[lang=en] [data-l=pt],:root:not([lang=en]) [data-l=en]{display:none!important}
+.sr-only{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.skip{position:absolute;left:1rem;top:-4rem;z-index:10;background:var(--surface);color:var(--fg);padding:.6rem 1rem;border-radius:10px;box-shadow:var(--shadow)}
+.skip:focus{top:1rem}
+.wrap{max-width:60rem;margin:0 auto;padding:0 1rem}
+@media (min-width:40rem){.wrap{padding:0 1.5rem}}
+
+/* topo */
+.top .wrap{display:flex;align-items:center;justify-content:space-between;gap:1rem;min-height:4rem}
+.brand{display:inline-flex;align-items:center;gap:.55rem;color:var(--fg);text-decoration:none;font-weight:700;font-size:1.15rem;letter-spacing:-.02em}
+.brand:hover{color:var(--fg)}
+.brand svg{flex:none}
+.brand rect{fill:var(--accent)}
+.brand g{stroke:var(--accent-fg)}
+.brand b{color:var(--accent);font-weight:700}
+.lang{font:inherit;font-size:.875rem;font-weight:600;color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:.35rem .85rem;min-height:2.25rem;cursor:pointer}
+.lang:hover{border-color:var(--line-strong)}
+
+/* hero */
+.hero{text-align:center;padding:1.5rem 0 1rem}
+@media (min-width:40rem){.hero{padding-top:2.5rem}}
+.hero h1{font-size:clamp(2rem,7vw,3.25rem);font-weight:800;letter-spacing:-.03em;max-width:20ch;margin:0 auto;text-wrap:balance}
+.hero h1 em{font-style:normal;color:var(--accent)}
+.lead{color:var(--muted);font-size:clamp(1.05rem,2.4vw,1.2rem);max-width:36rem;margin:1rem auto 0;text-wrap:pretty}
+
+/* envio */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:calc(var(--radius) + 6px);box-shadow:var(--shadow)}
+.uploader{max-width:42rem;margin:1.75rem auto 0;padding:.75rem;text-align:left;scroll-margin-top:1rem}
+.uploader:focus{outline:none}
+.drop{position:relative;display:flex;flex-direction:column;align-items:center;text-align:center;gap:.35rem;padding:2.25rem 1rem 2rem;border:2px dashed var(--line-strong);border-radius:var(--radius);cursor:pointer;transition:background-color .15s,border-color .15s}
+.drop:hover{border-color:var(--accent)}
+.drop.is-over{border-color:var(--accent);background:var(--accent-soft)}
+.drop-icon{display:grid;place-items:center;width:3.5rem;height:3.5rem;border-radius:50%;background:var(--accent-soft);color:var(--accent);margin-bottom:.5rem}
+.drop-title{font-size:1.15rem;font-weight:700;margin:0}
+.drop-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:.5rem .75rem;margin:.6rem 0 .25rem;color:var(--muted)}
+.drop-hint{color:var(--muted);font-size:.875rem;margin:.35rem 0 0}
+@media (hover:none) and (pointer:coarse){.paste-hint,.drop-title-desktop{display:none}}
+@media not ((hover:none) and (pointer:coarse)){.drop-title-touch{display:none}}
+:root:not(.js) .drop{display:none}
+.nojs{padding:1.25rem;text-align:center;color:var(--muted)}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:.45rem;font:inherit;font-weight:650;font-size:.95rem;line-height:1.2;min-height:2.75rem;padding:.6rem 1.1rem;border-radius:12px;border:1px solid var(--line-strong);background:var(--surface);color:var(--fg);cursor:pointer;text-decoration:none;white-space:nowrap}
+.btn:hover{border-color:var(--fg);color:var(--fg)}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+.btn-primary:hover{background:var(--accent-hover);border-color:var(--accent-hover);color:var(--accent-fg)}
+.btn-danger{color:var(--danger);border-color:currentColor;background:transparent}
+.btn-danger:hover{background:var(--danger-soft);color:var(--danger);border-color:currentColor}
+.btn[disabled]{opacity:.6;cursor:progress}
+#file:focus-visible+label{outline:3px solid var(--focus);outline-offset:3px}
+
+.state{padding:1.5rem 1rem}
+.busy-name{font-weight:600;margin-bottom:.75rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+progress{display:block;width:100%;height:.6rem;border:0;border-radius:999px;background:var(--line);overflow:hidden;appearance:none;-webkit-appearance:none}
+progress::-webkit-progress-bar{background:var(--line);border-radius:999px}
+progress::-webkit-progress-value{background:var(--accent);border-radius:999px;transition:width .2s}
+progress::-moz-progress-bar{background:var(--accent);border-radius:999px}
+.busy-text{color:var(--muted);font-size:.875rem;margin-top:.6rem}
+
+.alert,.notice{margin:.75rem .25rem .25rem;padding:.75rem 1rem;border-radius:12px;color:var(--fg)}
+.alert{background:var(--danger-soft);border-left:4px solid var(--danger)}
+.notice{background:var(--accent-soft);border-left:4px solid var(--accent)}
+
+.res{padding:1rem .5rem .5rem}
+@media (min-width:40rem){.res{padding:1.25rem 1rem .75rem}}
+.res-head{display:flex;align-items:center;gap:1rem;margin-bottom:1.25rem}
+.res-head>div{min-width:0}
+.thumb{flex:none;width:5.5rem;height:5.5rem;border-radius:12px;border:1px solid var(--line);background:var(--code);object-fit:contain}
+.res-title{font-size:1.2rem;font-weight:750;display:flex;align-items:center;gap:.4rem;margin:0}
+.res-title:focus{outline:none}
+.res-title svg{color:var(--ok);flex:none}
+.res-meta{color:var(--muted);font-size:.875rem;margin:.2rem 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.field-label{display:block;font-weight:650;font-size:.9rem;margin:0 0 .35rem}
+.field{display:flex;gap:.5rem;margin-bottom:.75rem}
+.field input{flex:1;min-width:0;font:inherit;font-family:var(--mono);font-size:.9rem;padding:.55rem .75rem;min-height:2.75rem;border-radius:12px;border:1px solid var(--line-strong);background:var(--code);color:var(--fg)}
+.field .btn{flex:none;min-width:6.5rem}
+.btn.is-done{border-color:var(--ok);color:var(--ok);background:var(--surface)}
+.res-actions{display:flex;flex-wrap:wrap;gap:.5rem;margin:0 0 1.25rem}
+.warn{background:var(--warn-bg);border:1px solid var(--warn-line);border-radius:14px;padding:1rem;margin-bottom:.25rem}
+.warn h3{font-size:1rem;display:flex;align-items:center;gap:.45rem;color:var(--warn-fg);margin-bottom:.35rem}
+.warn p{font-size:.925rem}
+.warn .field input{background:var(--surface)}
+.del-panel{padding:1.25rem 1rem}
+.del-panel h2{font-size:1.25rem;margin-bottom:1rem}
+.del-panel h2:focus{outline:none}
+.del-panel .res-head{margin-bottom:1rem}
+.del-panel .res-actions{margin:0}
+@media (max-width:30rem){.field{flex-wrap:wrap}.field input{flex-basis:100%}.field .btn{flex:1}.res-actions .btn{flex:1 1 auto}.thumb{width:4.5rem;height:4.5rem}.res-title{font-size:1.05rem}}
+
+/* seções */
+section{scroll-margin-top:1rem}
+.block{padding:3.5rem 0 0}
+.block>h2{font-size:clamp(1.4rem,3.5vw,1.75rem);margin-bottom:1.25rem}
+.trio{display:grid;gap:1rem 1.5rem;grid-template-columns:repeat(auto-fit,minmax(14rem,1fr));max-width:52rem;margin:2.25rem auto 0;padding:0;list-style:none;text-align:left}
+.trio li{display:flex;gap:.75rem;align-items:flex-start}
+.trio svg{flex:none;color:var(--accent);margin-top:.15rem}
+.trio strong{display:block}
+.trio span{color:var(--muted);font-size:.925rem}
+.trio strong span{color:var(--fg);font-size:1rem}
+.grid{display:grid;gap:1rem}
+@media (min-width:40rem){.grid{grid-template-columns:repeat(2,1fr)}.grid .wide{grid-column:span 2}}
+@media (min-width:56rem){.grid{grid-template-columns:repeat(3,1fr)}}
+.info{padding:1.25rem 1.25rem 1.1rem;border-radius:var(--radius)}
+.info h3{font-size:1.05rem;margin-bottom:.5rem}
+.info p{color:var(--muted);font-size:.95rem}
+.info p strong{color:var(--fg)}
+.callout{display:flex;flex-wrap:wrap;gap:1rem 1.5rem;align-items:center;justify-content:space-between;padding:1.25rem 1.5rem;border-radius:var(--radius);background:var(--accent-soft);border:1px solid var(--line)}
+.callout p{margin:0;max-width:38rem}
+.callout strong{display:block;font-size:1.05rem;margin-bottom:.15rem}
+.dev{padding:1.5rem;border-radius:var(--radius)}
+.dev>p{color:var(--muted)}
+.dev h3{font-size:.95rem;margin:1.25rem 0 .4rem}
+.dev .more{margin-top:1.25rem}
+pre{margin:0;background:var(--code);border:1px solid var(--line);border-radius:12px;padding:.8rem 1rem;overflow-x:auto;font-size:.85rem;line-height:1.55}
+p code{font-size:.9em;background:var(--code);padding:.1em .35em;border-radius:5px;border:1px solid var(--line)}
+
+/* rodapé */
+.foot{margin-top:4rem;border-top:1px solid var(--line);padding:1.75rem 0 2.5rem;color:var(--muted);font-size:.9rem}
+.foot .wrap{display:flex;flex-wrap:wrap;gap:.5rem 1.5rem;justify-content:space-between}
+.foot p{margin:0}
+
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important;scroll-behavior:auto!important}}
+@media (forced-colors:active){.drop{border-color:CanvasText}.btn{border:1px solid ButtonText}}
 </style>
 </head>
 <body>
-<main>
-<h1>vkdl<span>.link</span></h1>
-<p class="lead">Hospedagem de imagens simples, anônima e de código aberto.</p>
+<a class="skip" href="#enviar"><span data-l="pt">Pular para o envio</span><span data-l="en" lang="en">Skip to upload</span></a>
 
-<h2>Como enviar</h2>
-<p>Envie uma imagem PNG, JPEG, GIF ou WebP de até {{.MaxUpload}}. A resposta traz o link público e um token para apagar depois.</p>
-<pre><code>curl -F "file=@captura.png" {{.BaseURL}}/v1/upload</code></pre>
-<p>Para apagar, use o <code>delete_url</code> e o <code>delete_token</code> que vieram na resposta:</p>
-<pre><code>curl -X DELETE -H "X-Delete-Token: SEU_TOKEN" {{.BaseURL}}/v1/files/ID</code></pre>
+<header class="top">
+<div class="wrap">
+<a class="brand" href="/">
+<svg width="30" height="30" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><rect width="32" height="32" rx="8"/><g fill="none" stroke-width="2.6" stroke-linecap="round"><path d="M14 18a4.5 4.5 0 0 0 6.4.4l3-3a4.5 4.5 0 0 0-6.4-6.4l-1.5 1.5"/><path d="M18 14a4.5 4.5 0 0 0-6.4-.4l-3 3a4.5 4.5 0 0 0 6.4 6.4l1.5-1.5"/></g></svg>
+<span>vkdl<b>.link</b></span>
+</a>
+<button id="lang" class="lang" type="button" hidden></button>
+</div>
+</header>
 
-<h2>Por quanto tempo a imagem fica?</h2>
-<p>Envios anônimos são gratuitos e <strong>não têm prazo garantido</strong>. O limite é o espaço em disco: quando ele acaba, as imagens mais antigas são apagadas primeiro para dar lugar às novas. Não prometemos nenhum tempo mínimo, então guarde uma cópia do que for importante.</p>
-<p>Chaves de API têm um período de retenção garantido. Durante esse período a imagem não é apagada para liberar espaço.</p>
+<main id="main">
+<div class="wrap">
 
-<h2>Privacidade e remoção</h2>
-<p>Não guardamos o seu IP: usamos apenas um hash dele para limitar abusos. Só aceitamos imagens rasterizadas (nada de SVG, HTML ou outros formatos).</p>
-<p>Quem tem o token de exclusão pode apagar a imagem a qualquer momento. Para pedir a remoção de uma imagem que não é sua (LGPD, direitos autorais, abuso), abra uma issue em <a href="https://github.com/vkdprojects/vkdl.link/issues">github.com/vkdprojects/vkdl.link/issues</a>. Se o conteúdo for sensível, não cole o link na issue: peça um contato privado.</p>
+<section class="hero" aria-labelledby="t-hero">
+<h1 id="t-hero"><span data-l="pt">Compartilhe imagens com <em>um link</em>.</span><span data-l="en" lang="en">Share images with <em>a link</em>.</span></h1>
+<p class="lead" data-l="pt">Arraste, cole ou escolha uma imagem e receba um link na hora. Grátis, sem cadastro e de código aberto.</p>
+<p class="lead" data-l="en" lang="en">Drop, paste or pick an image and get a link right away. Free, no sign-up, open source.</p>
 
-<hr>
+<div id="enviar" class="card uploader" data-max-bytes="{{.MaxBytes}}" data-max-human="{{.MaxUpload}}" tabindex="-1">
+<h2 class="sr-only"><span data-l="pt">Enviar uma imagem</span><span data-l="en" lang="en">Upload an image</span></h2>
 
-<h2 lang="en">In English</h2>
-<div lang="en">
-<p><strong>vkdl.link</strong> is a simple, anonymous, open source image host. Upload a PNG, JPEG, GIF or WebP image up to {{.MaxUpload}}:</p>
-<pre><code>curl -F "file=@screenshot.png" {{.BaseURL}}/v1/upload</code></pre>
-<p>The JSON response contains the public <code>url</code>, a <code>delete_url</code> and a <code>delete_token</code>:</p>
-<pre><code>curl -X DELETE -H "X-Delete-Token: YOUR_TOKEN" {{.BaseURL}}/v1/files/ID</code></pre>
-<p><strong>Retention:</strong> anonymous uploads are free and have <strong>no guaranteed retention</strong>. Storage is the limit: when it runs out, the oldest images are deleted first. We never promise a minimum time, so keep a copy of anything important. API keys come with a guaranteed retention period.</p>
-<p><strong>Privacy and removal:</strong> we do not store your IP address, only a keyed hash of it for abuse prevention. Anyone holding the delete token can delete the image. To request removal of content that is not yours, open an issue at <a href="https://github.com/vkdprojects/vkdl.link/issues">github.com/vkdprojects/vkdl.link/issues</a> (ask for a private contact if the content is sensitive).</p>
+<div id="drop" class="drop">
+<span class="drop-icon" aria-hidden="true"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg></span>
+<p class="drop-title"><span class="drop-title-desktop" data-t="dropTitle">Arraste uma imagem para cá</span><span class="drop-title-touch" data-t="dropTitleTouch">Envie uma imagem</span></p>
+<div class="drop-row">
+<input id="file" class="sr-only" type="file" accept="image/png,image/jpeg,image/gif,image/webp">
+<label for="file" class="btn btn-primary" data-t="pick">Escolher imagem</label>
+<span class="paste-hint"><span data-l="pt">ou cole com</span><span data-l="en" lang="en">or paste with</span> <kbd>Ctrl</kbd>+<kbd>V</kbd></span>
+</div>
+<p class="drop-hint"><span data-l="pt">PNG, JPEG, GIF ou WebP · até {{.MaxUpload}}</span><span data-l="en" lang="en">PNG, JPEG, GIF or WebP · up to {{.MaxUpload}}</span></p>
 </div>
 
-<footer>
-<p>Software livre sob a licença <a href="https://www.gnu.org/licenses/agpl-3.0.html">AGPL-3.0</a>. Código-fonte / source code: <a href="https://github.com/vkdprojects/vkdl.link">github.com/vkdprojects/vkdl.link</a>.</p>
-</footer>
+<noscript><p class="nojs">O envio pelo navegador precisa de JavaScript. Sem ele, use a API (veja “Para desenvolvedores”). / Browser upload needs JavaScript; you can still use the API below.</p></noscript>
+
+<div id="busy" class="state" hidden>
+<p class="busy-name" id="busy-name"></p>
+<progress id="prog" max="100" value="0" aria-labelledby="busy-text"></progress>
+<p class="busy-text" id="busy-text"></p>
+</div>
+
+<div id="result" class="res" hidden>
+<div class="res-head">
+<img id="thumb" class="thumb" alt="" width="88" height="88">
+<div>
+<h3 class="res-title" id="res-title" tabindex="-1"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span data-t="doneTitle">Pronto! Sua imagem está no ar.</span></h3>
+<p class="res-meta" id="res-meta"></p>
+</div>
+</div>
+<label class="field-label" for="out-url" data-t="linkLabel">Link da imagem</label>
+<div class="field"><input id="out-url" type="text" readonly spellcheck="false"><button class="btn btn-primary" type="button" data-copy="out-url">Copiar</button></div>
+<div class="res-actions">
+<a id="open" class="btn" href="/" target="_blank" rel="noopener noreferrer" data-t="open">Abrir imagem</a>
+<button id="again" class="btn" type="button" data-t="again">Enviar outra imagem</button>
+</div>
+<div class="warn">
+<h3><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg><span data-t="warnTitle">Guarde o link de exclusão</span></h3>
+<p data-t="warnText">É a única forma de apagar esta imagem depois. Ele não aparece de novo e nós não temos como recuperá-lo.</p>
+<label class="field-label" for="out-del" data-t="delLabel">Link de exclusão (não compartilhe)</label>
+<div class="field" id="del-field"><input id="out-del" type="text" readonly spellcheck="false"><button class="btn" type="button" data-copy="out-del">Copiar</button></div>
+<button id="del-now" class="btn btn-danger" type="button" data-t="delNow">Apagar agora</button>
+</div>
+</div>
+
+<div id="del-panel" class="del-panel" hidden>
+<h2 id="del-title" tabindex="-1" data-t="delTitle">Apagar esta imagem?</h2>
+<div class="res-head">
+<img id="del-thumb" class="thumb" alt="" width="88" height="88">
+<div><p class="res-meta" id="del-id"></p><p data-t="delText">Ela some do link para sempre. Não dá para desfazer.</p></div>
+</div>
+<div class="res-actions">
+<button id="del-yes" class="btn btn-danger" type="button" data-t="delYes">Apagar definitivamente</button>
+<button id="del-no" class="btn" type="button" data-t="cancel">Cancelar</button>
+</div>
+</div>
+
+<div id="err" class="alert" role="alert" hidden></div>
+<div id="note" class="notice" role="status" hidden></div>
+<p id="live" class="sr-only" aria-live="polite"></p>
+</div>
+
+<ul class="trio">
+<li><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg><div><strong><span data-l="pt">Rápido e sem cadastro</span><span data-l="en" lang="en">Fast, no account</span></strong><span data-l="pt">Nada de login, e-mail ou senha.</span><span data-l="en" lang="en">No login, email or password.</span></div></li>
+<li><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg><div><strong><span data-l="pt">Sem rastreadores</span><span data-l="en" lang="en">No trackers</span></strong><span data-l="pt">Sem anúncios, cookies ou IP guardado.</span><span data-l="en" lang="en">No ads, cookies or stored IPs.</span></div></li>
+<li><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/></svg><div><strong><span data-l="pt">Código aberto</span><span data-l="en" lang="en">Open source</span></strong><span data-l="pt">Qualquer pessoa pode ler o código e hospedar o seu.</span><span data-l="en" lang="en">Anyone can read the code and host their own.</span></div></li>
+</ul>
+</section>
+
+<section class="block" id="bom-saber" aria-labelledby="t-info">
+<h2 id="t-info"><span data-l="pt">Bom saber</span><span data-l="en" lang="en">Good to know</span></h2>
+<div class="grid">
+<article class="card info">
+<h3><span data-l="pt">Formatos e tamanho</span><span data-l="en" lang="en">Formats and size</span></h3>
+<p data-l="pt">Aceitamos <strong>PNG, JPEG, GIF e WebP</strong> de até <strong>{{.MaxUpload}}</strong>. Conferimos o conteúdo do arquivo, não só o nome: SVG, PDF e outros formatos são recusados.</p>
+<p data-l="en" lang="en">We accept <strong>PNG, JPEG, GIF and WebP</strong> up to <strong>{{.MaxUpload}}</strong>. We check the file contents, not just the name: SVG, PDF and other formats are refused.</p>
+</article>
+<article class="card info">
+<h3><span data-l="pt">Por quanto tempo a imagem fica?</span><span data-l="en" lang="en">How long does the image stay?</span></h3>
+<p data-l="pt">Envios sem conta são grátis e <strong>não têm prazo garantido</strong>. Quando o espaço acaba, as imagens mais antigas são apagadas primeiro para dar lugar às novas. Guarde uma cópia do que for importante.</p>
+<p data-l="pt">Em breve: chaves de API com tempo de guarda garantido.</p>
+<p data-l="en" lang="en">Uploads without an account are free and have <strong>no guaranteed retention</strong>. When space runs out, the oldest images are deleted first to make room. Keep a copy of anything important.</p>
+<p data-l="en" lang="en">Coming soon: API keys with guaranteed retention.</p>
+</article>
+<article class="card info">
+<h3><span data-l="pt">Quem pode ver?</span><span data-l="en" lang="en">Who can see it?</span></h3>
+<p data-l="pt"><strong>Qualquer pessoa que tiver o link.</strong> O site não lista nem divulga as imagens, mas o link não é uma senha: não envie nada que precise ficar em segredo.</p>
+<p data-l="en" lang="en"><strong>Anyone who has the link.</strong> The site never lists or promotes images, but a link is not a password: don't upload anything that must stay secret.</p>
+</article>
+<article class="card info">
+<h3><span data-l="pt">Privacidade</span><span data-l="en" lang="en">Privacy</span></h3>
+<p data-l="pt">Não guardamos o seu IP. Usamos só um código embaralhado (hash) dele para limitar abusos. A página não usa cookies, anúncios nem rastreadores.</p>
+<p data-l="en" lang="en">We don't store your IP address, only a scrambled code (hash) of it to limit abuse. This page uses no cookies, ads or trackers.</p>
+</article>
+<article class="card info wide">
+<h3><span data-l="pt">Como apagar ou pedir remoção</span><span data-l="en" lang="en">Deleting and removal requests</span></h3>
+<p data-l="pt">Depois do envio você recebe um <strong>link de exclusão</strong>: abra-o para apagar a imagem quando quiser. Perdeu o link, ou a imagem não é sua (LGPD, direitos autorais, abuso)? <a href="https://github.com/vkdprojects/vkdl.link/issues">Abra uma issue no GitHub</a>. Se o conteúdo for sensível, não cole o link lá: peça um contato privado.</p>
+<p data-l="en" lang="en">After uploading you get a <strong>delete link</strong>: open it to delete the image whenever you want. Lost it, or the image isn't yours (privacy, copyright, abuse)? <a href="https://github.com/vkdprojects/vkdl.link/issues">Open an issue on GitHub</a>. If the content is sensitive, don't paste the link there: ask for a private contact.</p>
+</article>
+</div>
+</section>
+
+<section class="block" id="recortei" aria-label="Recortei">
+<div class="callout">
+<p data-l="pt"><strong>Tira muitos prints?</strong>O <a href="https://github.com/FabioHAraujo/Recortei">Recortei</a>, app livre de captura de tela para Windows e Linux, envia o recorte para o vkdl.link e copia o link para você.</p>
+<p data-l="en" lang="en"><strong>Take lots of screenshots?</strong><a href="https://github.com/FabioHAraujo/Recortei">Recortei</a>, a free screenshot app for Windows and Linux, uploads your capture to vkdl.link and copies the link for you.</p>
+<a class="btn" href="https://github.com/FabioHAraujo/Recortei"><span data-l="pt">Conhecer o Recortei</span><span data-l="en" lang="en">Get Recortei</span></a>
+</div>
+</section>
+
+<section class="block" id="desenvolvedores" aria-labelledby="t-dev">
+<h2 id="t-dev"><span data-l="pt">Para desenvolvedores</span><span data-l="en" lang="en">For developers</span></h2>
+<div class="card dev">
+<p data-l="pt">Uma API HTTP simples, sem cadastro, com respostas em JSON. Os erros vêm como <code>{"error": "...", "message": "..."}</code>.</p>
+<p data-l="en" lang="en">A simple HTTP API, no sign-up, JSON responses. Errors look like <code>{"error": "...", "message": "..."}</code>.</p>
+<h3><span data-l="pt">Enviar uma imagem</span><span data-l="en" lang="en">Upload an image</span></h3>
+<pre><code>curl -F "file=@captura.png" {{.BaseURL}}/v1/upload</code></pre>
+<h3><span data-l="pt">Resposta</span><span data-l="en" lang="en">Response</span></h3>
+<pre><code>{
+  "url": "{{.BaseURL}}/aB3dE9xQ.png",
+  "delete_url": "{{.BaseURL}}/v1/files/aB3dE9xQ",
+  "delete_token": "…",
+  "expires_at": null
+}</code></pre>
+<h3><span data-l="pt">Apagar</span><span data-l="en" lang="en">Delete</span></h3>
+<pre><code>curl -X DELETE -H "X-Delete-Token: DELETE_TOKEN" {{.BaseURL}}/v1/files/aB3dE9xQ</code></pre>
+<p class="more" data-l="pt">Documentação completa (limites, códigos de erro, OpenAPI) no <a href="https://github.com/vkdprojects/vkdl.link#api">README do projeto</a>.</p>
+<p class="more" data-l="en" lang="en">Full docs (limits, error codes, OpenAPI) in the <a href="https://github.com/vkdprojects/vkdl.link#api">project README</a>.</p>
+</div>
+</section>
+
+</div>
 </main>
+
+<footer class="foot">
+<div class="wrap">
+<p data-l="pt">vkdl.link é software livre sob a licença <a href="https://www.gnu.org/licenses/agpl-3.0.html">AGPL-3.0</a>.</p>
+<p data-l="en" lang="en">vkdl.link is free software under the <a href="https://www.gnu.org/licenses/agpl-3.0.html">AGPL-3.0</a> license.</p>
+<p><a href="https://github.com/vkdprojects/vkdl.link"><span data-l="pt">Código-fonte no GitHub</span><span data-l="en" lang="en">Source code on GitHub</span></a></p>
+</div>
+</footer>
+
+<script>
+"use strict";
+(() => {
+  const root = document.documentElement;
+  const $ = (id) => document.getElementById(id);
+  const box = $("enviar");
+  const maxBytes = Number(box.dataset.maxBytes) || 0;
+  const maxHuman = box.dataset.maxHuman || "";
+  const TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+  const ID_RE = /^[0-9A-Za-z]{8}$/;
+  const TOKEN_RE = /^[0-9A-Za-z]{16,128}$/;
+
+  const T = {
+    pt: {
+      title: "vkdl.link: compartilhe imagens com um link",
+      langBtn: "English", langBtnLang: "en",
+      dropTitle: "Arraste uma imagem para cá", dropTitleTouch: "Envie uma imagem", pick: "Escolher imagem",
+      uploading: "Enviando… {p}%", processing: "Quase lá…",
+      doneTitle: "Pronto! Sua imagem está no ar.", linkLabel: "Link da imagem", copy: "Copiar", copied: "Copiado!",
+      open: "Abrir imagem", again: "Enviar outra imagem",
+      warnTitle: "Guarde o link de exclusão",
+      warnText: "É a única forma de apagar esta imagem depois. Ele não aparece de novo e nós não temos como recuperá-lo.",
+      delLabel: "Link de exclusão (não compartilhe)", delNow: "Apagar agora",
+      delTitle: "Apagar esta imagem?", delText: "Ela some do link para sempre. Não dá para desfazer.",
+      delYes: "Apagar definitivamente", cancel: "Cancelar", deleting: "Apagando…",
+      confirmDel: "Apagar esta imagem de vez? Não dá para desfazer.",
+      deleted: "Imagem apagada. Cópias guardadas em cache podem levar alguns minutos para sumir.",
+      gone: "Essa imagem não existe mais: já foi apagada ou removida.",
+      forbidden: "Este link de exclusão não vale para essa imagem.",
+      delFail: "Não deu para apagar agora. Tente de novo em instantes.",
+      badLink: "Este link de exclusão está incompleto. Confira se copiou o endereço inteiro.",
+      copyFail: "Não deu para copiar automaticamente. O texto está selecionado: copie com Ctrl+C.",
+      uploaded: "Imagem enviada. O link está pronto para copiar.",
+      noImage: "Isso não é uma imagem. Copie uma imagem PNG, JPEG, GIF ou WebP e tente de novo.",
+      network: "Não foi possível falar com o servidor. Verifique a sua conexão e tente de novo.",
+      imageAlt: "Prévia da imagem enviada", delAlt: "Imagem que será apagada", fallbackName: "imagem",
+      errors: {
+        too_large: "Essa imagem passa do limite de {max}.",
+        unsupported_type: "Esse arquivo não é PNG, JPEG, GIF ou WebP.",
+        rate_limited: "Muitos envios em pouco tempo. Espere um pouco e tente de novo.",
+        storage_full: "O servidor está sem espaço no momento. Tente mais tarde.",
+        storage_timeout: "O servidor demorou demais para guardar a imagem. Tente de novo.",
+        no_file: "Nenhum arquivo foi enviado. Tente de novo.",
+        bad_request: "Não deu para ler o arquivo enviado. Tente de novo.",
+        internal: "Algo deu errado do nosso lado. Tente de novo em instantes."
+      }
+    },
+    en: {
+      title: "vkdl.link: share images with a link",
+      langBtn: "Português", langBtnLang: "pt-BR",
+      dropTitle: "Drop an image here", dropTitleTouch: "Upload an image", pick: "Choose image",
+      uploading: "Uploading… {p}%", processing: "Almost there…",
+      doneTitle: "Done! Your image is online.", linkLabel: "Image link", copy: "Copy", copied: "Copied!",
+      open: "Open image", again: "Upload another image",
+      warnTitle: "Save the delete link",
+      warnText: "It's the only way to delete this image later. It won't be shown again and we can't recover it.",
+      delLabel: "Delete link (don't share it)", delNow: "Delete now",
+      delTitle: "Delete this image?", delText: "It will be gone from its link for good. This can't be undone.",
+      delYes: "Delete permanently", cancel: "Cancel", deleting: "Deleting…",
+      confirmDel: "Delete this image for good? This can't be undone.",
+      deleted: "Image deleted. Cached copies may take a few minutes to disappear.",
+      gone: "This image no longer exists: it was already deleted or removed.",
+      forbidden: "This delete link isn't valid for this image.",
+      delFail: "Couldn't delete right now. Please try again in a moment.",
+      badLink: "This delete link is incomplete. Make sure you copied the whole address.",
+      copyFail: "Couldn't copy automatically. The text is selected: press Ctrl+C.",
+      uploaded: "Image uploaded. The link is ready to copy.",
+      noImage: "That's not an image. Copy a PNG, JPEG, GIF or WebP image and try again.",
+      network: "Couldn't reach the server. Check your connection and try again.",
+      imageAlt: "Preview of the uploaded image", delAlt: "Image to be deleted", fallbackName: "image",
+      errors: {
+        too_large: "This image is over the {max} limit.",
+        unsupported_type: "This file isn't a PNG, JPEG, GIF or WebP image.",
+        rate_limited: "Too many uploads in a short time. Wait a bit and try again.",
+        storage_full: "The server is out of space right now. Please try later.",
+        storage_timeout: "The server took too long to store the image. Please try again.",
+        no_file: "No file was sent. Please try again.",
+        bad_request: "Couldn't read the uploaded file. Please try again.",
+        internal: "Something went wrong on our side. Please try again in a moment."
+      }
+    }
+  };
+
+  const lang = () => (root.lang === "en" ? "en" : "pt");
+  const tr = (key) => T[lang()][key];
+  const fmt = (s, vars) => s.replace(/\{(\w+)\}/g, (_, k) => (vars && k in vars ? String(vars[k]) : ""));
+
+  // Mensagens na tela guardam a chave (não o texto) para trocar de idioma junto.
+  let errMsg = null;
+  let noteMsg = null;
+  let busyMsg = null;
+
+  function text(m) {
+    if (!m) return "";
+    if (m.err) return fmt(T[lang()].errors[m.err] || T[lang()].errors.internal, m.vars);
+    return fmt(tr(m.key), m.vars);
+  }
+  function showError(m) {
+    errMsg = m;
+    if (m) showNote(null);
+    $("err").textContent = text(m);
+    $("err").hidden = !m;
+  }
+  function showNote(m) {
+    noteMsg = m;
+    $("note").textContent = text(m);
+    $("note").hidden = !m;
+  }
+  function announce(s) {
+    const live = $("live");
+    live.textContent = "";
+    setTimeout(() => { live.textContent = s; }, 50);
+  }
+
+  function applyLang(l, save) {
+    const d = T[l];
+    root.lang = l === "en" ? "en" : "pt-BR";
+    document.title = d.title;
+    const b = $("lang");
+    b.textContent = d.langBtn;
+    b.lang = d.langBtnLang;
+    b.hidden = false;
+    document.querySelectorAll("[data-t]").forEach((el) => {
+      if (d[el.dataset.t]) el.textContent = d[el.dataset.t];
+    });
+    document.querySelectorAll("[data-copy]").forEach((el) => {
+      el.textContent = el.classList.contains("is-done") ? d.copied : d.copy;
+    });
+    $("thumb").alt = d.imageAlt;
+    $("del-thumb").alt = d.delAlt;
+    $("err").textContent = text(errMsg);
+    $("note").textContent = text(noteMsg);
+    $("busy-text").textContent = text(busyMsg);
+    if (save) {
+      try { localStorage.setItem("vkdl-lang", l); } catch (_) { /* sem armazenamento local: tudo bem */ }
+    }
+  }
+
+  // ---- estados do quadro de envio: idle, busy, result, delete ----
+  let busy = false;
+  let previewURL = null;
+  let current = null; // {id, token} do último envio desta página
+
+  function show(state) {
+    $("drop").hidden = state !== "idle";
+    $("busy").hidden = state !== "busy";
+    $("result").hidden = state !== "result";
+    $("del-panel").hidden = state !== "delete";
+  }
+  function reset() {
+    if (previewURL) URL.revokeObjectURL(previewURL);
+    previewURL = null;
+    current = null;
+    $("thumb").removeAttribute("src");
+    $("out-url").value = "";
+    $("out-del").value = "";
+    $("file").value = "";
+    show("idle");
+  }
+
+  function safeURL(u) {
+    try {
+      const x = new URL(String(u), location.href);
+      return x.protocol === "https:" || x.protocol === "http:" ? x : null;
+    } catch (_) {
+      return null;
+    }
+  }
+  function sizeText(n) {
+    if (n >= 1 << 20) return (n / (1 << 20)).toFixed(1).replace(/\.0$/, "") + " MB";
+    if (n >= 1 << 10) return Math.round(n / (1 << 10)) + " KB";
+    return n + " bytes";
+  }
+
+  function setBusy(m) {
+    busyMsg = m;
+    $("busy-text").textContent = text(m);
+  }
+
+  function upload(file) {
+    if (busy || !file) return;
+    showError(null);
+    showNote(null);
+    if (file.type && TYPES.indexOf(file.type) < 0) return showError({ err: "unsupported_type" });
+    if (maxBytes && file.size > maxBytes) return showError({ err: "too_large", vars: { max: maxHuman } });
+
+    busy = true;
+    const name = file.name || tr("fallbackName");
+    $("busy-name").textContent = name;
+    $("prog").value = 0;
+    setBusy({ key: "uploading", vars: { p: 0 } });
+    show("busy");
+
+    const form = new FormData();
+    form.append("file", file, name);
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/v1/upload");
+    xhr.upload.onprogress = (e) => {
+      if (!e.lengthComputable) return;
+      const p = Math.min(100, Math.round((e.loaded / e.total) * 100));
+      $("prog").value = p;
+      setBusy(p >= 100 ? { key: "processing" } : { key: "uploading", vars: { p } });
+    };
+    xhr.onload = () => {
+      busy = false;
+      busyMsg = null;
+      let data = null;
+      try { data = JSON.parse(xhr.responseText); } catch (_) { /* resposta não é JSON */ }
+      if (xhr.status === 201 && data && showResult(data, file)) return;
+      show("idle");
+      const code = data && typeof data.error === "string" ? data.error : "internal";
+      showError({ err: code, vars: { max: maxHuman } });
+    };
+    xhr.onerror = () => {
+      busy = false;
+      busyMsg = null;
+      show("idle");
+      showError({ key: "network" });
+    };
+    xhr.send(form);
+  }
+
+  // O link de exclusão leva o token no fragmento (#apagar=<id>.<token>), que o
+  // navegador nunca manda ao servidor: não aparece em logs nem no Referer.
+  function deleteLink(data) {
+    const del = safeURL(data.delete_url);
+    if (!del || !ID_RE.test(data.id) || !TOKEN_RE.test(data.delete_token)) return "";
+    return del.origin + "/#apagar=" + data.id + "." + data.delete_token;
+  }
+
+  function showResult(data, file) {
+    const url = safeURL(data.url);
+    if (!url) return false;
+    current = ID_RE.test(data.id) && TOKEN_RE.test(data.delete_token) ? { id: data.id, token: data.delete_token } : null;
+    if (previewURL) URL.revokeObjectURL(previewURL);
+    previewURL = URL.createObjectURL(file);
+    $("thumb").src = previewURL;
+    $("res-meta").textContent = (file.name ? file.name + " · " : "") + sizeText(Number(data.size) || file.size);
+    $("out-url").value = url.href;
+    $("open").href = url.href;
+    $("out-del").value = deleteLink(data);
+    $("del-field").hidden = !$("out-del").value;
+    $("del-now").hidden = !current;
+    show("result");
+    $("res-title").focus();
+    announce(tr("uploaded"));
+    return true;
+  }
+
+  // ---- copiar ----
+  function copied(btn) {
+    btn.classList.add("is-done");
+    btn.textContent = tr("copied");
+    announce(tr("copied"));
+    clearTimeout(btn._t);
+    btn._t = setTimeout(() => {
+      btn.classList.remove("is-done");
+      btn.textContent = tr("copy");
+    }, 2000);
+  }
+  function copy(btn) {
+    const input = $(btn.dataset.copy);
+    const fallback = () => {
+      input.focus();
+      input.select();
+      let ok = false;
+      try { ok = document.execCommand("copy"); } catch (_) { ok = false; }
+      if (ok) copied(btn);
+      else showNote({ key: "copyFail" });
+    };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(input.value).then(() => copied(btn), fallback);
+    } else {
+      fallback();
+    }
+  }
+
+  // ---- apagar ----
+  function remove(id, token, done) {
+    fetch("/v1/files/" + id, {
+      method: "DELETE",
+      headers: { "X-Delete-Token": token },
+      cache: "no-store",
+      credentials: "omit"
+    }).then((r) => done(r.status), () => done(0));
+  }
+  // afterDelete mostra o resultado; true quando a imagem não existe mais.
+  function afterDelete(status) {
+    if (status === 204 || status === 404) {
+      reset();
+      if (status === 204) {
+        showNote({ key: "deleted" });
+        announce(tr("deleted"));
+      } else {
+        showError({ key: "gone" });
+      }
+      return true;
+    }
+    showError({ key: status === 403 ? "forbidden" : status === 0 ? "network" : "delFail" });
+    return false;
+  }
+  function clearHash() {
+    if (location.hash) history.replaceState(null, "", location.pathname + location.search);
+  }
+
+  let pending = null; // {id, token} vindo do link de exclusão aberto
+  function openDeleteFromHash() {
+    const m = /^#(?:apagar|delete)=(.*)$/.exec(location.hash);
+    if (!m) return;
+    const parts = m[1].split(".");
+    if (parts.length !== 2 || !ID_RE.test(parts[0]) || !TOKEN_RE.test(parts[1])) {
+      showError({ key: "badLink" });
+      return;
+    }
+    showError(null);
+    showNote(null);
+    pending = { id: parts[0], token: parts[1] };
+    $("del-id").textContent = location.host + "/" + pending.id;
+    const img = $("del-thumb");
+    img.hidden = false;
+    img.src = "/" + pending.id;
+    show("delete");
+    $("del-title").focus();
+  }
+  $("del-thumb").addEventListener("error", () => { $("del-thumb").hidden = true; });
+  $("del-yes").addEventListener("click", () => {
+    if (!pending) return;
+    const b = $("del-yes");
+    b.disabled = true;
+    b.textContent = tr("deleting");
+    remove(pending.id, pending.token, (status) => {
+      b.disabled = false;
+      b.textContent = tr("delYes");
+      if (afterDelete(status)) {
+        pending = null;
+        clearHash();
+        $("del-thumb").removeAttribute("src");
+      }
+    });
+  });
+  $("del-no").addEventListener("click", () => {
+    pending = null;
+    clearHash();
+    $("del-thumb").removeAttribute("src");
+    show("idle");
+  });
+  $("del-now").addEventListener("click", () => {
+    if (!current || !window.confirm(tr("confirmDel"))) return;
+    const b = $("del-now");
+    b.disabled = true;
+    remove(current.id, current.token, (status) => {
+      b.disabled = false;
+      afterDelete(status);
+    });
+  });
+
+  // ---- entrada: clique, arrastar e soltar, colar ----
+  const drop = $("drop");
+  const input = $("file");
+  // só no estado inicial: no resultado, um novo colar ou soltar trocaria o link de remoção
+  // (que não aparece de novo) sem aviso; no painel de remoção #drop também fica oculto
+  const canTakeFile = () => !busy && !drop.hidden;
+  input.addEventListener("change", () => {
+    const f = input.files && input.files[0];
+    // limpa já: escolher o mesmo arquivo de novo (após um erro) precisa disparar "change"
+    input.value = "";
+    upload(f);
+  });
+  drop.addEventListener("click", (e) => {
+    if (e.target === input || e.target.closest("label")) return;
+    input.click();
+  });
+
+  let depth = 0;
+  const hasFiles = (e) => !!e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], "Files") >= 0;
+  window.addEventListener("dragenter", (e) => {
+    if (!hasFiles(e) || !canTakeFile()) return;
+    depth++;
+    if (!drop.hidden) drop.classList.add("is-over");
+  });
+  window.addEventListener("dragleave", () => {
+    depth = Math.max(0, depth - 1);
+    if (!depth) drop.classList.remove("is-over");
+  });
+  window.addEventListener("dragover", (e) => {
+    if (hasFiles(e)) e.preventDefault();
+  });
+  window.addEventListener("drop", (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault(); // sem isso o navegador sai da página para abrir o arquivo
+    depth = 0;
+    drop.classList.remove("is-over");
+    if (canTakeFile()) upload(e.dataTransfer.files[0]);
+  });
+
+  document.addEventListener("paste", (e) => {
+    const t = e.target;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
+    if (!canTakeFile() || !e.clipboardData) return;
+    for (const it of e.clipboardData.items || []) {
+      if (it.kind === "file" && it.type.indexOf("image/") === 0) {
+        e.preventDefault();
+        upload(it.getAsFile());
+        return;
+      }
+    }
+    if (e.clipboardData.files && e.clipboardData.files.length) {
+      e.preventDefault();
+      showError({ key: "noImage" });
+    }
+  });
+
+  document.querySelectorAll("[data-copy]").forEach((b) => b.addEventListener("click", () => copy(b)));
+  $("again").addEventListener("click", () => {
+    showError(null);
+    showNote(null);
+    reset();
+    $("file").focus();
+  });
+  $("lang").addEventListener("click", () => applyLang(lang() === "en" ? "pt" : "en", true));
+
+  root.classList.add("js");
+  let saved = null;
+  try { saved = localStorage.getItem("vkdl-lang"); } catch (_) { saved = null; }
+  applyLang(saved === "en" ? "en" : "pt", false);
+  openDeleteFromHash();
+  window.addEventListener("hashchange", openDeleteFromHash);
+})();
+</script>
 </body>
 </html>

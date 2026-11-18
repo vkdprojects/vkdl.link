@@ -1,11 +1,16 @@
 package server
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/vkdprojects/vkdl.link/internal/janitor"
 )
 
 func TestHealthz(t *testing.T) {
@@ -26,31 +31,115 @@ func TestIndexPage(t *testing.T) {
 	if !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/html") {
 		t.Fatalf("Content-Type = %q", resp.Header.Get("Content-Type"))
 	}
-	csp := resp.Header.Get("Content-Security-Policy")
-	if !strings.Contains(csp, "default-src 'none'") {
-		t.Errorf("CSP = %q", csp)
-	}
-	body := string(readAll(t, resp.Body))
+	body := readAll(t, resp.Body)
+	page := string(body)
 	for _, s := range []string{
-		"https://vkdl.test/v1/upload", "1 MB", "AGPL-3.0", "https://github.com/vkdprojects/vkdl.link",
-		"prefers-color-scheme", "não têm prazo garantido", "no guaranteed retention", "remoção",
+		`<html lang="pt-BR">`, "Compartilhe imagens com", "Share images with",
+		"https://vkdl.test/v1/upload", "AGPL-3.0", "https://github.com/vkdprojects/vkdl.link",
+		"https://github.com/FabioHAraujo/Recortei", "prefers-color-scheme",
+		"não têm prazo garantido", "no guaranteed retention", "mais antigas são apagadas primeiro",
+		"Não guardamos o seu IP", "Para desenvolvedores", "X-Delete-Token", `type="file"`,
 	} {
-		if !strings.Contains(body, s) {
+		if !strings.Contains(page, s) {
 			t.Errorf("página sem %q", s)
 		}
 	}
-	// autocontida: nada de recursos externos
-	for _, s := range []string{"<script", "<link", "src=\"http"} {
-		if strings.Contains(body, s) {
-			t.Errorf("página carrega recurso externo: %q", s)
+	// o limite vem da configuração (1 MB no ambiente de teste), legível e em bytes para o script
+	if !strings.Contains(page, "até 1 MB") || !strings.Contains(page, `data-max-bytes="1048576"`) {
+		t.Error("página sem o tamanho máximo da configuração")
+	}
+	// autocontida: nada carregado de fora e nada de HTML montado com dados
+	for _, s := range []string{"<script src", "<link rel=\"stylesheet\"", "@import", "url(http", "innerHTML", "eval(", "new Function"} {
+		if strings.Contains(page, s) {
+			t.Errorf("página contém %q", s)
 		}
 	}
 	// pt-BR vem antes do inglês
-	if strings.Index(body, "Como enviar") > strings.Index(body, "In English") {
+	if strings.Index(page, "Compartilhe imagens") > strings.Index(page, "Share images") {
 		t.Error("pt-BR devia vir primeiro")
 	}
+
+	// CSP: só os blocos inline desta página, pelo hash, sem 'unsafe-inline'
+	csp := resp.Header.Get("Content-Security-Policy")
+	for _, s := range []string{"default-src 'none'", "connect-src 'self'", "frame-ancestors 'none'", "base-uri 'none'"} {
+		if !strings.Contains(csp, s) {
+			t.Errorf("CSP sem %q: %s", s, csp)
+		}
+	}
+	if strings.Contains(csp, "unsafe-") {
+		t.Errorf("CSP afrouxada: %s", csp)
+	}
+	for _, tag := range []string{"script", "style"} {
+		blocks := regexp.MustCompile(`(?s)<`+tag+`>(.*?)</`+tag+`>`).FindAllSubmatch(body, -1)
+		if len(blocks) == 0 {
+			t.Fatalf("página sem <%s>", tag)
+		}
+		var want []string
+		for _, b := range blocks {
+			sum := sha256.Sum256(b[1])
+			want = append(want, "'sha256-"+base64.StdEncoding.EncodeToString(sum[:])+"'")
+		}
+		if d := tag + "-src " + strings.Join(want, " ") + ";"; !strings.Contains(csp, d) {
+			t.Errorf("CSP sem %q: %s", d, csp)
+		}
+	}
+	// todo bloco com atributos ficaria fora da política
+	if regexp.MustCompile(`<(script|style)\s`).Match(body) {
+		t.Error("<script>/<style> com atributos não entram no hash da CSP")
+	}
+	if regexp.MustCompile(`\son[a-z]+=|\sstyle=`).Match(body) {
+		t.Error("atributos on*/style= são bloqueados pela CSP")
+	}
+
 	head := e.do("HEAD", "/", nil, nil)
 	expectStatus(t, head, http.StatusOK)
+	if head.Header.Get("Content-Security-Policy") != csp {
+		t.Error("HEAD com CSP diferente do GET")
+	}
+}
+
+func TestIndexPageMaxUploadFromConfig(t *testing.T) {
+	e := newEnv(t, func(o *Options, _ *janitor.Janitor) { o.MaxUpload = 20 << 20 })
+	page := string(readAll(t, e.do("GET", "/", nil, nil).Body))
+	for _, s := range []string{"até 20 MB", "up to 20 MB", `data-max-bytes="20971520"`} {
+		if !strings.Contains(page, s) {
+			t.Errorf("página sem %q", s)
+		}
+	}
+}
+
+// Regras de entrada do script da página (o comportamento em si é conferido no navegador):
+// o <input type="file"> é limpo a cada escolha, para que repetir o mesmo arquivo depois de
+// um erro dispare "change" de novo, e colar/soltar só vale no estado inicial, para que um
+// segundo envio não substitua o resultado (e o único link de remoção) sem aviso.
+func TestPageScriptInputRules(t *testing.T) {
+	change := regexp.MustCompile(`(?s)input\.addEventListener\("change", \(\) => \{(.*?)\n  \}\);`).FindStringSubmatch(pageHTML)
+	if change == nil {
+		t.Fatal("página sem o tratador de change do input")
+	}
+	clear, call := strings.Index(change[1], `input.value = "";`), strings.Index(change[1], "upload(")
+	if clear < 0 || call < 0 || clear > call {
+		t.Errorf("o input devia ser limpo antes do envio: %s", change[1])
+	}
+	if !strings.Contains(pageHTML, "const canTakeFile = () => !busy && !drop.hidden;") {
+		t.Error("colar/soltar devia valer só com o quadro inicial (#drop) visível")
+	}
+	for _, s := range []string{"canTakeFile()) upload(e.dataTransfer.files[0])", "if (!canTakeFile() || !e.clipboardData) return;"} {
+		if !strings.Contains(pageHTML, s) {
+			t.Errorf("soltar/colar sem passar por canTakeFile: falta %q", s)
+		}
+	}
+}
+
+func TestInlineHashes(t *testing.T) {
+	sum := sha256.Sum256([]byte("a()"))
+	h := "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+	if got := inlineHashes([]byte("x<script>a()</script>y<script>a()</script>"), "script"); len(got) != 2 || got[0] != h || got[1] != h {
+		t.Errorf("inlineHashes = %v", got)
+	}
+	if got := inlineHashes([]byte("<p>nada</p>"), "style"); len(got) != 1 || got[0] != "'none'" {
+		t.Errorf("sem blocos = %v", got)
+	}
 }
 
 func TestUnknownRoutesAreJSON404(t *testing.T) {
