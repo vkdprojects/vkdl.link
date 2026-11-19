@@ -130,11 +130,12 @@ Tudo por variáveis de ambiente:
 |---|---|---|
 | `VKDL_LISTEN` | `:8080` | endereço de escuta |
 | `VKDL_BASE_URL` | `http://localhost:8080` | origem pública usada para montar os links (produção: `https://vkdl.link`) |
-| `VKDL_DATA_DIR` | `./data` (no container: `/data`) | SQLite, temporários de envio e (com `fs`) os arquivos |
+| `VKDL_DATA_DIR` | `./data` (no container: `/data`) | SQLite, temporários de envio, (com `fs`) os arquivos e (com `s3`) os que ainda esperam o envio ao bucket |
 | `VKDL_STORAGE` | `s3` se `S3_BUCKET` estiver definido, senão `fs` | onde ficam as imagens; veja [Armazenamento](#armazenamento-disco-ou-s3) |
 | `VKDL_MAX_STORAGE` | `10GB` | orçamento total de bytes (aceita KB/MB/GB/TB, base 1024; `0` desliga) |
 | `VKDL_MIN_FREE_DISK` | `1GB` | só com `fs`: despeja quando o espaço livre do volume cai abaixo disso (`0` desliga) |
 | `VKDL_MAX_UPLOAD` | `20MB` | tamanho máximo de um envio |
+| `VKDL_PENDING_MAX` | `512MB` | só com `s3`: quanto pode esperar no disco o envio ao bucket; veja [Envio ao bucket em segundo plano](#envio-ao-bucket-em-segundo-plano) (`0` = responder só depois de gravar no bucket) |
 | `VKDL_ADMIN_TOKEN` | vazio (admin desligado) | bearer token de `/v1/admin/*` |
 | `VKDL_SECRET` | aleatório a cada boot (com aviso) | segredo do HMAC dos IPs |
 | `VKDL_RATE_ANON` | `30` | envios por minuto por IP (anônimo; `0` desliga) |
@@ -163,8 +164,8 @@ trocar o segredo só muda os hashes de IP.
 
 Os **metadados** (arquivos, chaves de API) ficam sempre no SQLite em
 `VKDL_DATA_DIR/vkdl.db`, e os envios passam por `VKDL_DATA_DIR/tmp` antes de
-irem para o destino. Por isso `/data` continua precisando de um volume
-persistente mesmo com S3. Já as **imagens** podem ficar em dois lugares:
+irem para o destino (com S3, também por `VKDL_DATA_DIR/pending`; veja abaixo).
+Por isso `/data` continua precisando de um volume persistente mesmo com S3. Já as **imagens** podem ficar em dois lugares:
 
 - **`fs`** (padrão sem `S3_BUCKET`): em `VKDL_DATA_DIR/files/<id[0:2]>/<id>.<ext>`.
   O despejo considera `VKDL_MAX_STORAGE` e `VKDL_MIN_FREE_DISK`.
@@ -203,10 +204,7 @@ das credenciais). O log de boot mostra o endpoint, o bucket e o prefixo em uso.
 > apagado e o log registra um erro. Confira o volume e o bucket/prefixo antes
 > de reiniciar; os objetos sem linha não aparecem no site, mas continuam lá.
 
-Com S3, o envio dos bytes ao bucket acontece fora da fila do despejo, com um
-prazo proporcional ao tamanho (20 s + 1 s a cada 256 KiB, no máximo 2 min).
-Se o bucket não responder a tempo, o cliente recebe `503 storage_timeout` e
-nada fica gravado; GET/HEAD de arquivos desistem em segundos (15 s pelos
+GET/HEAD de arquivos que já estão no bucket desistem em segundos (15 s pelos
 cabeçalhos, até 3 tentativas) em vez de ficarem presos. Requisições com várias
 faixas (`Range: bytes=0-0,5-5,...`) recebem o arquivo inteiro com 200, e cada
 GET no bucket pede no máximo 4 MiB.
@@ -245,6 +243,35 @@ S3_KEY_SECRET=...
 as variáveis `S3_*` e suba de novo com o mesmo `/data` (o banco continua lá).
 Linhas cujo arquivo não foi copiado são removidas na reconciliação do boot;
 depois de conferir, `/data/files` pode ser apagado.
+
+### Envio ao bucket em segundo plano
+
+Com S3, o `POST /v1/upload` responde assim que a imagem está gravada no disco
+do servidor (em `VKDL_DATA_DIR/pending`), sem esperar o bucket. O link já
+funciona nesse instante: até o envio terminar, o GET serve a cópia local, que
+é a imagem de verdade (não há imagem de "processando"), com os mesmos
+cabeçalhos de sempre. Quando o bucket confirma o envio, a cópia local é
+apagada e o GET passa a buscar no bucket.
+
+- Se o envio falhar, ele é tentado de novo (esperando 1 s, 2 s, 4 s... até
+  1 min entre tentativas) até dar certo. Cada tentativa tem o prazo de 20 s +
+  1 s a cada 256 KiB (no máximo 2 min).
+- Se o processo cair ou reiniciar, os arquivos de `pending` continuam lá e o
+  envio é retomado no boot. A reconciliação do boot conta com eles, então
+  nenhuma linha é apagada por "não estar no bucket" enquanto espera.
+- `DELETE` (e o despejo) de um arquivo que ainda espera cancela o envio,
+  apaga a cópia local e apaga no bucket, caso já tenha chegado lá.
+- `GET /v1/admin/stats` mostra `pending_files` e `pending_bytes`. Se esses
+  números crescerem, o bucket está com problema; o log registra cada falha.
+- Quando o que espera passa de `VKDL_PENDING_MAX`, os envios novos voltam a
+  esperar o bucket antes de responder (o comportamento do `VKDL_PENDING_MAX=0`).
+  Assim um bucket fora do ar não enche o disco: o cliente recebe o erro.
+
+Com `VKDL_PENDING_MAX=0`, ou sempre que a fila está cheia, o envio dos bytes
+ao bucket acontece antes da resposta, fora da fila do despejo, com um prazo
+proporcional ao tamanho (20 s + 1 s a cada 256 KiB, no máximo 2 min). Se o
+bucket não responder a tempo, o cliente recebe `503 storage_timeout` e nada
+fica gravado.
 
 ## Hospedando você mesmo (Docker)
 

@@ -40,7 +40,7 @@ func TestLoadDefaults(t *testing.T) {
 	if c.Listen != ":8080" || c.BaseURL != "http://localhost:8080" || c.DataDir != "./data" {
 		t.Errorf("padrões errados: %+v", c)
 	}
-	if c.MaxStorage != 10<<30 || c.MinFreeDisk != 1<<30 || c.MaxUpload != 20<<20 {
+	if c.MaxStorage != 10<<30 || c.MinFreeDisk != 1<<30 || c.MaxUpload != 20<<20 || c.PendingMax != 512<<20 {
 		t.Errorf("tamanhos padrão errados: %+v", c)
 	}
 	if c.RateAnon != 30 || c.RateKey != 300 || c.TrustedProxyHeader != "CF-Connecting-IP" {

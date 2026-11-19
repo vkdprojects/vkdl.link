@@ -259,6 +259,10 @@ paths:
                   active_keys: { type: integer }
                   revoked_keys: { type: integer }
                   max_upload: { type: integer }
+                  pending_files:
+                    type: integer
+                    description: Com S3, arquivos já servidos do disco local que ainda não chegaram ao bucket.
+                  pending_bytes: { type: integer }
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/AdminDisabled" }
 

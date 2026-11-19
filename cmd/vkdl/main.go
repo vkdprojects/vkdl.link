@@ -65,6 +65,7 @@ func run(log *slog.Logger) error {
 		Log:        log,
 	}
 	var st store.Store
+	var wb *store.WriteBack
 	switch cfg.Storage {
 	case config.StorageS3:
 		s3, err := openS3(ctx, cfg.S3)
@@ -76,6 +77,22 @@ func run(log *slog.Logger) error {
 			"ssl", cfg.S3.UseSSL, "path_style", cfg.S3.PathStyle)
 		if cfg.MaxStorage <= 0 {
 			log.Warn("VKDL_MAX_STORAGE=0 com s3: nada limita o tamanho do bucket")
+		}
+		if cfg.PendingMax > 0 {
+			// o link sai assim que o arquivo está no disco; o envio ao bucket
+			// segue em segundo plano (veja store.WriteBack)
+			wb, err = store.NewWriteBack(s3, filepath.Join(cfg.DataDir, "pending"), store.WriteBackOptions{
+				MaxBytes: cfg.PendingMax,
+				Log:      log,
+			})
+			if err != nil {
+				return err
+			}
+			st = wb
+			n, bytes := wb.Pending()
+			log.Info("envio ao bucket em segundo plano", "pending_max", cfg.PendingMax, "pending", n, "pending_bytes", bytes)
+		} else {
+			log.Info("VKDL_PENDING_MAX=0: o envio só responde depois de gravar no bucket")
 		}
 	default:
 		filesDir := filepath.Join(cfg.DataDir, "files")
@@ -95,6 +112,15 @@ func run(log *slog.Logger) error {
 		return err
 	} else if n > 0 {
 		log.Warn("reconciliação: linhas sem arquivo (ou com arquivo truncado) removidas", "rows", n)
+	}
+	// depois da reconciliação: os órfãos que ela apagou não precisam ser
+	// enviados. Os envios seguem durante o desligamento gracioso do HTTP (o
+	// defer roda depois do Shutdown); o que sobrar fica em disco para o
+	// próximo boot.
+	if wb != nil {
+		wbCtx, wbStop := context.WithCancel(context.Background())
+		defer wbStop()
+		wb.Start(wbCtx)
 	}
 	if err := jan.Sweep(ctx); err != nil {
 		log.Error("despejo inicial falhou", "err", err)

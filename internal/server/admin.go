@@ -83,7 +83,14 @@ func (s *Server) handleListKeys(w http.ResponseWriter, r *http.Request) {
 	for _, k := range keys {
 		out = append(out, viewKey(k))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"keys": out})
+	// com o envio ao bucket em segundo plano: o que ainda está só no disco
+	pendingFiles, pendingBytes := 0, int64(0)
+	if p, ok := s.store.(interface{ Pending() (int, int64) }); ok {
+		pendingFiles, pendingBytes = p.Pending()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"pending_files": pendingFiles,
+		"pending_bytes": pendingBytes, "keys": out})
 }
 
 func (s *Server) handleRevokeKey(w http.ResponseWriter, r *http.Request) {
@@ -112,7 +119,14 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 			diskFree = &n
 		}
 	}
+	// com o envio ao bucket em segundo plano: o que ainda está só no disco
+	pendingFiles, pendingBytes := 0, int64(0)
+	if p, ok := s.store.(interface{ Pending() (int, int64) }); ok {
+		pendingFiles, pendingBytes = p.Pending()
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
+		"pending_files":   pendingFiles,
+		"pending_bytes":   pendingBytes,
 		"files":           st.Files,
 		"anon_files":      st.AnonFiles,
 		"keyed_files":     st.KeyedFiles,

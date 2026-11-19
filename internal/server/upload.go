@@ -215,6 +215,10 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 // OrphanMinAge (bem maior que putBudgetMax). Se qualquer passo falhar ou o
 // cliente desistir antes da linha, o objeto é apagado. O id só chega ao
 // cliente depois daqui, então ninguém vê o intervalo.
+//
+// Com o store.WriteBack (S3 com VKDL_PENDING_MAX > 0), putFile só move o
+// arquivo para a fila local e volta na hora; o envio ao bucket continua em
+// segundo plano depois da resposta, e até lá o GET serve a cópia local.
 func (s *Server) commit(ctx context.Context, f *db.File, spoolPath string) error {
 	id, release, err := s.claimID(ctx)
 	if err != nil {

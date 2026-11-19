@@ -33,8 +33,9 @@ var errUnsorted = errors.New("janitor: listagem do armazenamento fora de ordem")
 // O espaço livre medido por DiskFree já desconta o envio que está entrando,
 // porque ele é gravado no spool (mesmo volume) e adotado (um rename, que não
 // ocupa mais nada) antes de Reserve. Com o armazenamento S3 os arquivos
-// não ficam no disco local: DiskFree e MinFreeDisk ficam zerados e o único
-// limite é MaxStorage.
+// não ficam no disco local (só os que esperam o envio, limitados por
+// VKDL_PENDING_MAX): DiskFree e MinFreeDisk ficam zerados e o único limite é
+// MaxStorage.
 type Janitor struct {
 	DB          *db.DB
 	Store       store.Store

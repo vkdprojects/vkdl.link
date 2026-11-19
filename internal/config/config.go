@@ -29,6 +29,7 @@ type Config struct {
 	CFZoneID           string         // VKDL_CF_ZONE_ID: com CFAPIToken, purga o cache da Cloudflare ao apagar
 	CFAPIToken         string         // VKDL_CF_API_TOKEN (permissão Cache Purge); nunca logar
 	Storage            string         // VKDL_STORAGE: StorageFS ou StorageS3
+	PendingMax         int64          // VKDL_PENDING_MAX: com s3, quanto pode esperar no disco o envio ao bucket (0 = envio síncrono)
 	S3                 S3             // preenchido só quando Storage == StorageS3
 }
 
@@ -87,6 +88,9 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 	if c.MaxUpload, err = ParseSize(get("VKDL_MAX_UPLOAD", "20MB")); err != nil {
 		return c, fmt.Errorf("VKDL_MAX_UPLOAD: %w", err)
+	}
+	if c.PendingMax, err = ParseSize(get("VKDL_PENDING_MAX", "512MB")); err != nil {
+		return c, fmt.Errorf("VKDL_PENDING_MAX: %w", err)
 	}
 	if c.MaxUpload <= 0 {
 		return c, fmt.Errorf("VKDL_MAX_UPLOAD: precisa ser maior que zero")
